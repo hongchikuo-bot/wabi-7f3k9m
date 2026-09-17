@@ -654,6 +654,76 @@ function statusChip(status) {
 // 目前正在編輯費用的項目 id（null = 沒有）
 let editingItemId = null;
 
+// ===== 依工項彙總（跨樓層看同一個工項的總帳）=====
+// 同一個工項在 1F、2F 各自是一筆項目（進度與費用不同），
+// 但在這裡可以把它們收在一起看總金額與總進度。
+let itemView = 'node';   // 'node' = 依地點（樹）／'work' = 依工項
+
+function syncViewToggle() {
+  const btn = $('viewToggleBtn');
+  if (btn) btn.textContent = itemView === 'node' ? '依工項彙總' : '← 回依地點';
+}
+
+export function toggleItemView() {
+  itemView = itemView === 'node' ? 'work' : 'node';
+  renderProjectItems();
+  bindStructureActions();
+}
+
+// 工項名稱：沒填 work_type 就退回用「項目名稱」——所以不填也能彙總
+const workTypeOf = i => String(i.work_type || i.title || '（未命名）').trim();
+
+function renderItemsByWorkType(box, nodeName, statusOptions, payOptions) {
+  const groups = new Map();
+  currentItems.forEach(i => {
+    const k = workTypeOf(i);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(i);
+  });
+  const sorted = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh-TW'));
+
+  box.innerHTML = sorted.map(([wt, list]) => {
+    const est = totalOf(list, 'estimated_cost');
+    const fin = totalOf(list, 'final_cost');
+    const done = list.filter(i => i.status === 'completed').length;
+
+    const rows = list.map(i => {
+      // 編輯直接在原地展開，不用切回樹狀檢視
+      if (editingItemId === i.id) return itemEditForm(i, nodeName, payOptions);
+      const opts = statusOptions.map(([v, l]) =>
+        `<option value="${v}"${(i.status || '') === v ? ' selected' : ''}>${l}</option>`).join('');
+      const hasFin = i.final_cost !== null && i.final_cost !== undefined && i.final_cost !== '';
+      return `
+      <div class="wt-row">
+        <span class="wt-loc">${esc(nodeName(i.node_id))}</span>
+        <select class="status-select" data-item-status="${esc(i.id)}">${opts}</select>
+        <span class="chip money">${money(i.estimated_cost)}</span>
+        ${hasFin ? `<span class="chip money">→ ${money(i.final_cost)}</span>` : ''}
+        <span class="row-actions">
+          <button class="btn-sm btn-ghost" data-item-timeline="${esc(i.id)}">歷程${currentLogCounts[i.id] ? ` (${currentLogCounts[i.id]})` : ''}</button>
+          <button class="btn-sm btn-ghost" data-edit-item="${esc(i.id)}">編輯</button>
+        </span>
+      </div>`;
+    }).join('');
+
+    return `
+    <div class="item-card wt-group">
+      <div class="item-head">
+        <strong>${esc(wt)}</strong>
+        <span class="row-actions">
+          <span class="chip">${list.length} 個地點</span>
+          ${done ? `<span class="chip done">已完成 ${done}</span>` : ''}
+          <span class="chip money">預估 ${money(est)}</span>
+          ${fin ? `<span class="chip money">實際 ${money(fin)}</span>` : ''}
+        </span>
+      </div>
+      ${rows}
+    </div>`;
+  }).join('');
+}
+
+window.toggleItemView = toggleItemView;
+
 function renderProjectItems() {
   const box = $('itemsContainer');
   if (!box) return;
@@ -679,6 +749,12 @@ function renderProjectItems() {
     ['', '（未設定）'], ['unpaid', '未付'], ['deposit_paid', '已付訂金'],
     ['partial_paid', '部分付款'], ['settled', '已結清']
   ];
+
+  syncViewToggle();
+  if (itemView === 'work') {
+    renderItemsByWorkType(box, nodeName, statusOptions, payOptions);
+    return;
+  }
 
   box.innerHTML = (batchOpen ? batchForm() : '') + currentItems.map(i => {
     if (editingItemId === i.id) return itemEditForm(i, nodeName, payOptions);
@@ -741,6 +817,7 @@ function itemEditForm(i, nodeName, payOptions) {
     </div>
     <div class="edit-grid">
       ${fld('ef-title', '項目名稱', i.title)}
+      ${fld('ef-worktype', '工項（彙總用）', i.work_type)}
       ${fld('ef-assignee', '負責人', i.assignee)}
       ${fld('ef-phone', '電話', i.assignee_phone, 'text', 'inputmode="tel"')}
       ${fld('ef-est', '預估費用', i.estimated_cost, 'number', 'min="0" step="1"')}
@@ -780,6 +857,7 @@ export async function saveItem(itemId) {
   try {
     await project.updateItemRow(itemId, {
       title,
+      work_type: ($('ef-worktype') ? $('ef-worktype').value : '').trim() || null,
       assignee: ($('ef-assignee') ? $('ef-assignee').value : '').trim() || null,
       assignee_phone: ($('ef-phone') ? $('ef-phone').value : '').trim() || null,
       estimated_cost: est,
@@ -809,6 +887,14 @@ function fillStructureSelects() {
   // 新增項目的「地點」
   const ino = $('newItemNode');
   if (ino) ino.innerHTML = '<option value="">選擇地點…</option>' + opts;
+
+  // 用過的工項做成建議清單（避免「主牆塗漿」與「主牆手工塗漿」被當成兩種）
+  const dl = $('workTypeList');
+  if (dl) {
+    const types = [...new Set(currentItems.map(i => i.work_type).filter(Boolean))]
+      .sort((a, b) => String(a).localeCompare(String(b), 'zh-TW'));
+    dl.innerHTML = types.map(t => `<option value="${esc(t)}"></option>`).join('');
+  }
 }
 
 // ===== 建立：階層 =====
@@ -884,18 +970,20 @@ export async function createProjectItem() {
   if (!currentProject) return;
   const nodeId = $('newItemNode')?.value;
   const title = ($('newItemTitle')?.value || '').trim();
+  const workType = ($('newItemWorkType')?.value || '').trim() || null;
   const status = $('newItemStatus')?.value || null;
   const assignee = ($('newItemAssignee')?.value || '').trim() || null;
   const estRaw = $('newItemEst')?.value;
   const est = (estRaw === '' || estRaw === null || estRaw === undefined) ? null : Number(estRaw);
-  if (!nodeId) return showToast('請選擇所屬節點', 'error');
+  if (!nodeId) return showToast('請選擇所屬地點', 'error');
   if (!title) return showToast('請輸入項目名稱', 'error');
   if (est !== null && (!isFinite(est) || est < 0)) return showToast('預估費用必須是 0 以上的數字', 'error');
   try {
     await project.createItem(currentProject.id, {
-      node_id: nodeId, title, status, assignee, estimated_cost: est
+      node_id: nodeId, title, status, assignee, estimated_cost: est, work_type: workType
     });
-    ['newItemTitle', 'newItemAssignee', 'newItemEst'].forEach(id => { if ($(id)) $(id).value = ''; });
+    ['newItemTitle', 'newItemAssignee', 'newItemEst', 'newItemWorkType']
+      .forEach(id => { if ($(id)) $(id).value = ''; });
     showToast('項目已建立', 'success');
     await loadStructure();
   } catch (err) {
@@ -1046,12 +1134,15 @@ export async function doBatchCreate() {
   if (!titles.length) return showToast('請至少寫一個工項（一行一個）', 'error');
 
   // 交叉相乘：每個地點 × 每個工項
+  // 因為使用者輸入的就是「工項名稱」，所以 work_type 直接等於它 ——
+  // 這樣建完馬上就能用「依工項彙總」看總帳，不必再逐筆補。
   const rows = [];
   nodeIds.forEach(nid => titles.forEach(t => rows.push({
     project_id: currentProject.id,
     node_id: nid,
     title: t,
-    status: null
+    status: null,
+    work_type: t
   })));
 
   const btn = document.querySelector('[data-do-batch]');

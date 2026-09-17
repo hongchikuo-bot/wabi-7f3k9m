@@ -157,6 +157,14 @@
       display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
       gap: 10px; margin-top: 12px;
     }
+    /* 依工項彙總 */
+    .wt-group { border-left: 3px solid #bf8b2e; }
+    .wt-row {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      padding: 9px 0; border-top: 1px dashed #ece6dc; font-size: 13px;
+    }
+    .wt-loc { flex: 1 1 190px; color: #5a4d3f; }
+    .wt-row .row-actions { float: none; margin-left: auto; }
     /* 批次建立：地點一多要限高捲動，否則整頁被拉長 */
     .batch-nodes {
       max-height: 220px; overflow-y: auto;
@@ -367,10 +375,14 @@
         <div id="itemsContainer"></div>
         <div class="inline-form" style="margin-top:12px">
           <button class="btn-sm btn-ghost" id="batchOpenBtn" onclick="openBatchForm()">＋ 批次建立（多個地點 × 多個工項）</button>
+          <button class="btn-sm btn-ghost" id="viewToggleBtn" onclick="toggleItemView()">依工項彙總</button>
         </div>
         <div class="inline-form">
           <select id="newItemNode"></select>
-          <input type="text" id="newItemTitle" placeholder="項目名稱（例：主牆手工塗漿）">
+          <input type="text" id="newItemWorkType" list="workTypeList"
+                 placeholder="工項（例：主牆塗漿）" style="flex:1 1 150px">
+          <datalist id="workTypeList"></datalist>
+          <input type="text" id="newItemTitle" placeholder="項目名稱（例：客廳主牆手工塗漿）">
           <input type="text" id="newItemAssignee" placeholder="負責人（選填）">
           <input type="number" id="newItemEst" placeholder="預估費用" min="0" step="1" style="flex:0 0 120px">
           <select id="newItemStatus">
@@ -381,7 +393,10 @@
           </select>
           <button onclick="createProjectItem()">新增項目</button>
         </div>
-        <p class="hint">費用、電話、付款狀態可以先留空，之後在項目卡片按「編輯」補上。</p>
+        <p class="hint">
+          「工項」是跨樓層彙總用的（同一個工項在 1F／2F 各一筆，但可以一起看總帳）。
+          留空就用「項目名稱」當工項。費用、電話、付款狀態可以先留空，之後按「編輯」補上。
+        </p>
       </div>
 
       <!-- ④ 專案成員 -->

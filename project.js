@@ -343,7 +343,9 @@ export async function duplicateNodeSubtree({
         project_id: projectId,
         node_id: idMap.get(n.id),
         title: it.title,
-        status: null
+        status: null,
+        // 工項要帶著 —— 這是跨樓層彙總的依據
+        work_type: it.work_type || null
       }));
     });
     if (itemRows.length) {
