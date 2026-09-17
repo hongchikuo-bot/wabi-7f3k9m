@@ -552,6 +552,8 @@ function bindStructureActions() {
   on('[data-save-item]', 'data-save-item', saveItem);
   on('[data-cancel-item]', 'data-cancel-item', cancelEditItem);
   on('[data-del-item]', 'data-del-item', deleteItem);
+  if ($('newItemWorkTypePick')) $('newItemWorkTypePick').onchange = pickWorkType;
+  if ($('newItemTitlePick')) $('newItemTitlePick').onchange = pickItemTitle;
   on('[data-item-timeline]', 'data-item-timeline', openItemTimeline);
   document.querySelectorAll('[data-item-status]').forEach(s => {
     s.onchange = () => changeItemStatus(s.getAttribute('data-item-status'), s.value);
@@ -888,13 +890,25 @@ function fillStructureSelects() {
   const ino = $('newItemNode');
   if (ino) ino.innerHTML = '<option value="">選擇地點…</option>' + opts;
 
-  // 用過的工項做成建議清單（避免「主牆塗漿」與「主牆手工塗漿」被當成兩種）
-  const dl = $('workTypeList');
-  if (dl) {
-    const types = [...new Set(currentItems.map(i => i.work_type).filter(Boolean))]
-      .sort((a, b) => String(a).localeCompare(String(b), 'zh-TW'));
-    dl.innerHTML = types.map(t => `<option value="${esc(t)}"></option>`).join('');
-  }
+  // 用過的工項／名稱做成「真正的下拉選單」
+  // ⚠️ 不要用 <datalist>：iOS Safari 不支援，手機上等於沒有建議清單。
+  const uniqSorted = arr => [...new Set(arr.filter(v => v !== null && v !== undefined && String(v).trim()))]
+    .map(v => String(v).trim())
+    .sort((a, b) => a.localeCompare(b, 'zh-TW'));
+  const fillPick = (elId, list, emptyLabel, newLabel) => {
+    const el = $(elId);
+    if (!el) return;
+    const prev = el.value;
+    el.innerHTML = `<option value="">${emptyLabel}</option>`
+      + list.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')
+      + `<option value="__new">${newLabel}</option>`;
+    // 盡量保留原本選的（重繪後不要跳掉）
+    if (prev && [...el.options].some(o => o.value === prev)) el.value = prev;
+  };
+  fillPick('newItemWorkTypePick', uniqSorted(currentItems.map(i => i.work_type)),
+           '工項：從用過的挑', '＋ 新的工項…');
+  fillPick('newItemTitlePick', uniqSorted(currentItems.map(i => i.title)),
+           '名稱：從用過的挑', '＋ 新的名稱…');
 }
 
 // ===== 建立：階層 =====
@@ -964,6 +978,25 @@ export function startAddChild(nodeId) {
   }
 }
 
+// ===== 「從用過的挑」下拉 =====
+// 下拉只是方便挑選；真正的來源是文字欄（只有選「＋ 新的…」時才把它顯示出來打字）
+function applyPick(selId, inputId) {
+  const sel = $(selId), inp = $(inputId);
+  if (!sel || !inp) return;
+  const v = sel.value;
+  if (v === '__new') {
+    inp.value = '';
+    inp.classList.remove('hidden');
+    inp.focus();
+  } else {
+    inp.value = v;                 // '' = 未設定
+    inp.classList.add('hidden');
+  }
+}
+
+export function pickWorkType() { applyPick('newItemWorkTypePick', 'newItemWorkType'); }
+export function pickItemTitle() { applyPick('newItemTitlePick', 'newItemTitle'); }
+
 // ===== 建立：項目 =====
 // 注意 items 表的主欄位是 title，不是 name（舊版程式讀 item.name 會顯示空白）
 export async function createProjectItem() {
@@ -982,8 +1015,12 @@ export async function createProjectItem() {
     await project.createItem(currentProject.id, {
       node_id: nodeId, title, status, assignee, estimated_cost: est, work_type: workType
     });
-    ['newItemTitle', 'newItemAssignee', 'newItemEst', 'newItemWorkType']
+    // 名稱／負責人／費用清掉；「工項」刻意保留 ——
+    // 同一個工項常常要連續建好幾筆（每層各一筆），每次重挑很煩
+    ['newItemTitle', 'newItemAssignee', 'newItemEst']
       .forEach(id => { if ($(id)) $(id).value = ''; });
+    if ($('newItemTitlePick')) $('newItemTitlePick').value = '';
+    if ($('newItemTitle')) $('newItemTitle').classList.add('hidden');
     showToast('項目已建立', 'success');
     await loadStructure();
   } catch (err) {
