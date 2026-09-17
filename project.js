@@ -1,0 +1,453 @@
+// Project Module - 專案 CRUD、成員管理、資料存取
+import { supabase } from './supabase-client.js';
+import {
+  getMyGlobalRole, getMyProjectRole, isAdmin, getProjectRoleLabel,
+  canCreateProjectCurrent, canDeleteItemCurrent, canManageItemsCurrent
+} from './permissions.js';
+
+// 快取自己的 user id（inviteMember 要寫 invited_by 用）
+let currentUserIdCache = null;
+
+// 取得所有專案
+export async function getProjects() {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+// 取得單一專案
+export async function getProject(id) {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// 取得當前活動專案
+export function getCurrentProject() {
+  return window._currentProject || null;
+}
+
+// 切換活動專案
+export function setCurrentProject(project) {
+  window._currentProject = project;
+}
+
+// 建立專案
+export async function createProject(name, desc) {
+  const globalRole = await getMyGlobalRole();
+  if (!canCreateProjectCurrent(globalRole)) {
+    throw new Error('你沒有建立專案的權限');
+  }
+  // ⚠️ owner_id 一定要帶！資料庫有觸發器會用 new.owner_id 寫入 project_members，
+  // owner_id 是 NULL 時會直接 23502（null value in column "user_id"）而整個建立失敗。
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('請先登入');
+  const { data, error } = await supabase
+    .from('projects')
+    .insert([{ name, description: desc, owner_id: user.id }])
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// 刪除專案
+export async function deleteProject(id) {
+  const globalRole = await getMyGlobalRole();
+  if (!isAdmin(globalRole)) {
+    throw new Error('只有管理者可以刪除專案');
+  }
+  const { error } = await supabase
+    .from('projects')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+}
+
+// 取得專案成員
+export async function getProjectMembers(projectId) {
+  const { data, error } = await supabase
+    .from('project_members')
+    .select('*')
+    .eq('project_id', projectId);
+  if (error) throw error;
+  return data;
+}
+
+// 取得專案成員（含用戶名稱）
+// ⚠️ 兩個資料庫陷阱（實測 project_members 的真實欄位）：
+//   1. 這張表是「複合主鍵 (project_id, user_id)」，**沒有 id、沒有 created_at、沒有 email**
+//      → 不能用 .order('created_at')，會 400 被 catch 吃掉、成員清單靜默空白
+//   2. profiles 的 SELECT 政策只允許讀「自己」或「全域管理者」讀全部，
+//      不能對 profiles 用關聯嵌入（select('*, profiles(...))，非 admin 會直接錯誤
+export async function getProjectMembersWithNames(projectId) {
+  const { data, error } = await supabase
+    .from('project_members')
+    .select('*')
+    .eq('project_id', projectId);
+  if (error) throw error;
+  const members = data || [];
+  const ids = members.map(m => m.user_id).filter(Boolean);
+  const map = {};
+  if (ids.length) {
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id, display_name, email, role, status')
+      .in('id', ids);
+    (profs || []).forEach(p => { map[p.id] = p; });
+  }
+  return members.map(m => ({ ...m, profile: map[m.user_id] || null }));
+}
+
+// 用 Email 找帳號（⚠️ 只有全域管理者讀得到別人的 profile）
+export async function findProfileByEmail(email) {
+  const e = String(email || '').trim();
+  if (!e) return null;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, display_name, email, role, status')
+    .ilike('email', e)
+    .limit(1);
+  if (error) throw error;
+  return (data && data[0]) || null;
+}
+
+// 找出某人是否已是這個專案的成員
+export async function findMember(projectId, userId) {
+  const { data, error } = await supabase
+    .from('project_members')
+    .select('*')
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+    .limit(1);
+  if (error) throw error;
+  return (data && data[0]) || null;
+}
+
+// 加入專案（自己加入）
+export async function joinProject(projectId, role = 'viewer') {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('請先登入');
+  const { data, error } = await supabase
+    .from('project_members')
+    .upsert([{ project_id: projectId, user_id: user.id, role }])
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// 邀請成員（專案管理者／全域管理者用）
+// 原本是直接把 email 塞進 project_members，但資料庫的權限判斷一律用 user_id，
+// 而且 project_members 有 UNIQUE(project_id, user_id) / (project_id, email)，
+// 直接寫 email 會撞唯一鍵或讓 user_id 是 NULL。所以改成：
+//   Email → 查 profiles 拿 user_id → 寫入（已存在就改角色）
+export async function inviteMember(projectId, email, role = 'viewer') {
+  const globalRole = await getMyGlobalRole();
+  const projectRole = await getMyProjectRole(projectId);
+  if (!(isAdmin(globalRole) || projectRole === 'owner')) {
+    throw new Error('只有專案管理者或全域管理者可以新增成員');
+  }
+  const target = String(email || '').trim();
+  if (!target) throw new Error('請輸入成員的 Email');
+
+  const profile = await findProfileByEmail(target);
+  if (!profile) {
+    throw new Error(`找不到「${target}」這個帳號。請先請他從登入頁「申請帳號」，你再到「審核申請」批准，然後回來這裡加入成員。`);
+  }
+  if (profile.status !== 'approved') {
+    const stage = { pending: '待審核', rejected: '已拒絕' }[profile.status] || profile.status;
+    throw new Error(`「${profile.display_name || profile.email}」目前是「${stage}」，還沒開通。請先到「審核申請」批准。`);
+  }
+
+  const existing = await findMember(projectId, profile.id);
+  if (existing) {
+    if (existing.role === role) {
+      throw new Error(`「${profile.display_name || profile.email}」已經是這個專案的成員了（${getProjectRoleLabel(role)}）`);
+    }
+    const { data, error } = await supabase
+      .from('project_members')
+      .update({ role })
+      .eq('project_id', projectId)
+      .eq('user_id', profile.id)
+      .select();
+    if (error) throw error;
+    if (!data || !data.length) throw new Error('找不到這筆成員資料，沒有更新到任何列');
+    return { member: data[0], profile, updated: true };
+  }
+
+  // ⚠️ 只寫真實存在的欄位（沒有 email！）＋ invited_by 留下「誰邀請的」痕跡
+  const me = currentUserIdCache || (await supabase.auth.getUser()).data.user?.id || null;
+  currentUserIdCache = me;
+  const { data, error } = await supabase
+    .from('project_members')
+    .insert([{
+      project_id: projectId,
+      user_id: profile.id,
+      role,
+      ...(me ? { invited_by: me } : {})
+    }])
+    .select()
+    .single();
+  if (error) throw error;
+  return { member: data, profile, updated: false };
+}
+
+// 這個專案有幾位 owner（用來防止把最後一位管理者移除／降級）
+async function countOwners(projectId) {
+  const { data } = await supabase
+    .from('project_members')
+    .select('user_id')
+    .eq('project_id', projectId)
+    .eq('role', 'owner');
+  return data || [];
+}
+
+// 改變成員角色
+// ⚠️ project_members 是複合主鍵 (project_id, user_id)，沒有 id 欄，
+// 所以只能用這兩個欄位定位一列。
+export async function updateMemberRoleRow(projectId, userId, role) {
+  const globalRole = await getMyGlobalRole();
+  const projectRole = await getMyProjectRole(projectId);
+  if (!(isAdmin(globalRole) || projectRole === 'owner')) {
+    throw new Error('只有專案管理者可以改變成員角色');
+  }
+  if (role !== 'owner') {
+    const owners = await countOwners(projectId);
+    if (owners.length === 1 && owners[0].user_id === userId) {
+      throw new Error('這是最後一位專案管理者，不能降級。請先指定另一位專案管理者。');
+    }
+  }
+  const { data, error } = await supabase
+    .from('project_members')
+    .update({ role })
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+    .select();
+  if (error) throw error;
+  if (!data || !data.length) throw new Error('找不到這筆成員資料，沒有更新到任何列');
+  return data[0];
+}
+
+// 移除成員
+export async function removeMemberRow(projectId, userId) {
+  const globalRole = await getMyGlobalRole();
+  const projectRole = await getMyProjectRole(projectId);
+  if (!(isAdmin(globalRole) || projectRole === 'owner')) {
+    throw new Error('只有專案管理者可以移除成員');
+  }
+  const owners = await countOwners(projectId);
+  if (owners.length === 1 && owners[0].user_id === userId) {
+    throw new Error('這是最後一位專案管理者，不能移除。請先指定另一位專案管理者。');
+  }
+  const { error } = await supabase
+    .from('project_members')
+    .delete()
+    .eq('project_id', projectId)
+    .eq('user_id', userId);
+  if (error) throw error;
+}
+
+// 移除成員（舊簽章：projectId + userId，與上面等價）
+export async function removeMember(projectId, userId) {
+  return removeMemberRow(projectId, userId);
+}
+
+// ===== 項目 CRUD =====
+
+// 取得專案內所有項目
+export async function getItems(projectId) {
+  const { data, error } = await supabase
+    .from('items')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+// 建立項目
+export async function createItem(projectId, data) {
+  const canManage = await canManageItemsCurrent(projectId);
+  if (!canManage) throw new Error('你沒有建立項目的權限');
+  const { data: result, error } = await supabase
+    .from('items')
+    .insert([{ ...data, project_id: projectId }])
+    .select()
+    .single();
+  if (error) throw error;
+  return result;
+}
+
+// ===== 階層節點 =====
+
+// 取得專案內所有節點（hierarchy_nodes 有自己的 project_id，可一次撈完）
+export async function getNodesByProject(projectId) {
+  const { data, error } = await supabase
+    .from('hierarchy_nodes')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('sort_order');
+  if (error) throw error;
+  return data;
+}
+
+// 建立節點
+export async function createNode(data) {
+  const canManage = await canManageItemsCurrent(data.project_id);
+  if (!canManage) throw new Error('你沒有建立節點的權限');
+  const { data: created, error } = await supabase
+    .from('hierarchy_nodes')
+    .insert([data])
+    .select()
+    .single();
+  if (error) throw error;
+  return created;
+}
+
+// 更新項目
+export async function updateItem(id, data) {
+  const canManage = await canManageItemsCurrent(data.project_id || null);
+  if (!canManage) throw new Error('你沒有編輯項目的權限');
+  // 註：解構出的變數不能也叫 data（與參數同名 → SyntaxError）
+  const { data: updated, error } = await supabase
+    .from('items')
+    .update(data)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return updated;
+}
+
+// 刪除項目
+export async function deleteItem(id) {
+  const canDelete = await canDeleteItemCurrent(id);
+  if (!canDelete) throw new Error('你沒有刪除項目的權限');
+  const { error } = await supabase
+    .from('items')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+}
+
+// 取得單一項目
+export async function getItem(id) {
+  const { data, error } = await supabase
+    .from('items')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ===== 階層 =====
+
+// 取得專案階層定義（用 level_index 排序，不是 sort_order）
+export async function getHierarchyLevels(projectId) {
+  const { data, error } = await supabase
+    .from('hierarchy_levels')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('level_index');
+  if (error) throw error;
+  return data;
+}
+
+// 建立階層定義（必填：level_index / name / singular_name / plural_name）
+export async function createHierarchyLevel(projectId, data) {
+  const canManage = await canManageItemsCurrent(projectId);
+  if (!canManage) throw new Error('你沒有管理階層的權限');
+  const payload = {
+    project_id: projectId,
+    name: data.name,
+    singular_name: data.singular_name || data.name,
+    plural_name: data.plural_name || data.name,
+    level_index: data.level_index,
+    sort_order: data.sort_order ?? data.level_index
+  };
+  const { data: created, error } = await supabase
+    .from('hierarchy_levels')
+    .insert([payload])
+    .select()
+    .single();
+  if (error) throw error;
+  return created;
+}
+
+// 更新階層定義
+export async function updateHierarchyLevel(id, data) {
+  const { data: updated, error } = await supabase
+    .from('hierarchy_levels')
+    .update(data)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return updated;
+}
+
+// 刪除階層定義（呼叫端必須先刪掉底下的節點與項目）
+export async function deleteHierarchyLevel(id) {
+  const { error } = await supabase.from('hierarchy_levels').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// 更新節點
+export async function updateNodeRow(id, data) {
+  const { data: updated, error } = await supabase
+    .from('hierarchy_nodes')
+    .update(data)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return updated;
+}
+
+// 批次刪除節點（.in 需要非空陣列，呼叫端要先確認）
+export async function deleteNodeRows(ids) {
+  if (!ids.length) return 0;
+  const { error } = await supabase.from('hierarchy_nodes').delete().in('id', ids);
+  if (error) throw error;
+  return ids.length;
+}
+
+// 更新項目
+export async function updateItemRow(id, data) {
+  const { data: updated, error } = await supabase
+    .from('items')
+    .update(data)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return updated;
+}
+
+// 批次刪除項目
+export async function deleteItemRows(ids) {
+  if (!ids.length) return 0;
+  const { error } = await supabase.from('items').delete().in('id', ids);
+  if (error) throw error;
+  return ids.length;
+}
+
+// 取得階層節點
+export async function getHierarchyNodes(levelId) {
+  const { data, error } = await supabase
+    .from('hierarchy_nodes')
+    .select('*')
+    .eq('level_id', levelId)
+    .order('sort_order');
+  if (error) throw error;
+  return data;
+}

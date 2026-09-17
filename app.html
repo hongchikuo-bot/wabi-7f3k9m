@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wabi Sabi - 後台管理</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Georgia, serif;
+      background: #f5f0e8;
+      color: #3d352d;
+      min-height: 100vh;
+    }
+    header {
+      background: #3d352d;
+      color: #f5f0e8;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { color: #f5f0e8; font-weight: 400; }
+    #userRoleBadge {
+      background: #bf8b2e;
+      color: #3d352d;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-right: 16px;
+    }
+    nav {
+      background: #5a4d3f;
+      padding: 8px 32px;
+      display: flex;
+      gap: 8px;
+    }
+    nav button {
+      background: transparent;
+      color: #f5f0e8;
+      border: 1px solid #8a8070;
+      padding: 8px 16px;
+      font-size: 13px;
+    }
+    nav button:hover { background: #3d352d; }
+    main { padding: 32px; max-width: 1200px; margin: 0 auto; }
+    .section { margin-bottom: 40px; }
+    .hidden { display: none !important; }
+    .login-page {
+      display: flex; flex-direction: column; gap: 16px;
+      max-width: 420px; margin: 48px auto; padding: 0 16px;
+    }
+    .login-page .card { padding: 24px; }
+    .login-page h2 { font-size: 16px; margin-bottom: 16px; }
+    .pending-notice {
+      background: #fdf5e0; color: #7a5c1e; border: 1px solid #ecd9a8;
+      padding: 12px; border-radius: 4px; font-size: 14px; margin-top: 12px;
+    }
+    .project-title { font-size: 20px; font-weight: 600; margin-bottom: 16px; color: #5a4d3f; }
+    h2 { font-size: 22px; margin-bottom: 16px; color: #5a4d3f; }
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+    .card {
+      background: #fff;
+      padding: 20px;
+      border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .card h3 { font-size: 18px; margin-bottom: 8px; color: #3d352d; }
+    .card p { font-size: 14px; color: #8a8070; }
+    .hint { font-size: 12px; color: #a8a29e; margin: 0 0 12px; }
+    .empty { font-size: 13px; color: #a8a29e; padding: 6px 0; }
+
+    /* 專案卡片：原本這個 class 完全沒有樣式，看起來不像可以點 */
+    .project-card {
+      background: #fff; padding: 16px 20px; border-radius: 4px; cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06); border-left: 3px solid #bf8b2e;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .project-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+    .project-card h3 { font-size: 17px; margin-bottom: 4px; }
+    .project-card p { font-size: 13px; color: #8a8070; }
+
+    /* 結構區塊 */
+    .level-card, .node-card, .item-card, .application-card {
+      background: #fff; border: 1px solid #ece6dc; border-radius: 4px;
+      padding: 12px 16px; margin-bottom: 8px; font-size: 14px;
+    }
+    .chip {
+      display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px;
+      background: #f0ebe1; color: #7a6a52; margin-left: 6px; white-space: nowrap;
+    }
+    .chip.done { background: #dcecd8; color: #3f6b34; }
+    .chip.doing { background: #f6ecd0; color: #8a6a1e; }
+    .chip.paused { background: #ece0e0; color: #8b5454; }
+    ul.tree { list-style: none; padding-left: 0; margin: 6px 0 0; }
+    ul.tree ul { list-style: none; padding-left: 18px; border-left: 1px dashed #ddd5c8; margin: 4px 0; }
+    ul.tree li { margin: 5px 0; }
+    .inline-form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+    .inline-form input, .inline-form select { flex: 1 1 150px; min-width: 110px; width: auto; }
+    .inline-form button { flex: 0 0 auto; white-space: nowrap; }
+    .step-num { color: #bf8b2e; font-weight: 600; margin-right: 4px; }
+
+    /* 列表項目的編輯／刪除按鈕 */
+    .row-actions { float: right; display: inline-flex; gap: 6px; }
+    .btn-ghost {
+      background: transparent; color: #5a4d3f;
+      border: 1px solid #ddd5c8; padding: 4px 12px; font-size: 12px;
+      border-radius: 4px; cursor: pointer; font-family: inherit;
+    }
+    .btn-ghost:hover { background: #f0ebe1; }
+    .btn-danger {
+      background: #8b2e2e; color: #fff; border: none; padding: 4px 12px;
+      font-size: 12px; border-radius: 4px; cursor: pointer; font-family: inherit;
+    }
+    .btn-danger:hover { background: #6e2424; }
+    .item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .item-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .status-select {
+      width: auto; flex: 0 0 auto; padding: 4px 8px; font-size: 12px;
+      border: 1px solid #ddd5c8; border-radius: 4px; background: #fff;
+    }
+    /* 樹狀節點裡也要能對齊按鈕 */
+    ul.tree li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    ul.tree li .row-actions { float: none; margin-left: auto; }
+    ul.tree li > ul { flex-basis: 100%; }
+
+    /* 費用 */
+    .cost-summary {
+      background: #3d352d; color: #f5f0e8; border-radius: 4px;
+      padding: 12px 16px; margin-bottom: 20px; font-size: 13px;
+      display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline;
+    }
+    .cost-head { color: #bf8b2e; font-weight: 600; letter-spacing: 0.05em; }
+    .cost-cell strong { font-weight: 600; }
+    .cost-cell .over, .over { color: #d98b8b; }
+    .cost-cell .under, .under { color: #8fc48f; }
+    .chip.money { background: #f6ecd0; color: #7a5c1e; }
+    .item-money {
+      display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center;
+      margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ece6dc;
+      font-size: 12.5px;
+    }
+    .money-label { color: #a8a29e; margin-left: 4px; }
+    .money-label:first-child { margin-left: 0; }
+    .money-sep { color: #ddd5c8; }
+    .tel {
+      color: #2e6b2e; text-decoration: none; border-bottom: 1px dotted #7aa87a;
+      margin-left: 6px; font-variant-numeric: tabular-nums;
+    }
+    .tel:hover { background: #eef6ee; }
+    .money-label + .over { color: #8b2e2e; }
+    .money-label + .under { color: #2e6b2e; }
+
+    /* 行內編輯項目 */
+    .item-card.editing { background: #fffdf7; border-color: #bf8b2e; }
+    .edit-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px; margin-top: 12px;
+    }
+    .ef { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #8a8070; }
+    .ef input, .ef select { font-size: 14px; padding: 6px 8px; }
+    .ef-note { justify-content: flex-end; padding-top: 14px; color: #a8a29e; }
+    .btn-sm {
+      padding: 6px 14px;
+      font-size: 13px;
+      background: #bf8b2e;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    .btn-sm:hover { background: #a07820; }
+    .btn-danger { background: #8b2e2e; }
+    .btn-danger:hover { background: #6e2424; }
+    .approve-btn { background: #2e8b2e; }
+    .reject-btn { background: #8b2e2e; }
+    .form-group { margin-bottom: 16px; }
+    input, select, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal {
+      background: #fff;
+      padding: 32px;
+      border-radius: 8px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal h2 { margin-bottom: 20px; }
+    .close-modal { float: right; background: transparent; border: none; font-size: 20px; cursor: pointer; color: #8a8070; }
+    .toast-container { position: fixed; top: 20px; right: 20px; z-index: 1000; }
+    .toast { padding: 12px 20px; border-radius: 4px; margin-bottom: 8px; font-size: 14px; }
+    .toast.error { background: #e8d5d5; color: #8b2e2e; }
+    .toast.success { background: #d5e8d5; color: #2e8b2e; }
+  </style>
+</head>
+<body>
+
+  <!-- ===== 登入 / 註冊（申請制）===== -->
+  <div id="loginPage" class="login-page">
+    <div class="card">
+      <h2>登入</h2>
+      <form id="signinForm">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="signinEmail" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label>密碼</label>
+          <input type="password" id="signinPassword" autocomplete="current-password" required>
+        </div>
+        <button type="submit">登入</button>
+      </form>
+      <div id="pendingNotice" class="pending-notice hidden">
+        帳號尚待管理者審核，通過後才能使用後台。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>申請帳號</h2>
+      <form id="signupForm">
+        <div class="form-group">
+          <label>姓名</label>
+          <input type="text" id="signupName" required>
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="signupEmail" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label>密碼（至少 6 碼）</label>
+          <input type="password" id="signupPassword" autocomplete="new-password" minlength="6" required>
+        </div>
+        <button type="submit">送出申請</button>
+      </form>
+      <div class="pending-notice">送出後需由管理者批准，才會開通權限。</div>
+    </div>
+  </div>
+
+  <!-- ===== 後台主體 ===== -->
+  <div id="appPage" style="display:none">
+
+  <header>
+    <h1>Wabi Sabi 後台管理</h1>
+    <span id="userRoleBadge"></span>
+    <button id="logoutBtn" onclick="logout()">登出</button>
+  </header>
+
+  <nav>
+    <button onclick="showProjects()">專案列表</button>
+    <button onclick="showNewProjectForm()">新增專案</button>
+    <button id="applicationsMenuItem" onclick="loadApplications()">審核申請</button>
+  </nav>
+
+  <main>
+    <!-- 專案列表 -->
+    <div id="projectsSection" class="section">
+      <h2>專案列表</h2>
+      <div id="projectList" class="card-grid"></div>
+    </div>
+
+    <!-- 新增專案表單 -->
+    <div id="newProjectSection" class="section hidden">
+      <h2>新增專案</h2>
+      <div class="card">
+        <div class="form-group">
+          <label>專案名稱</label>
+          <input type="text" id="newProjectName" placeholder="輸入專案名稱">
+        </div>
+        <div class="form-group">
+          <label>描述</label>
+          <textarea id="newProjectDesc" rows="3" placeholder="專案描述"></textarea>
+        </div>
+        <button onclick="createNewProject()">建立專案</button>
+      </div>
+    </div>
+
+    <!-- 專案結構：階層 → 節點 → 項目 -->
+    <div id="itemsSection" class="section hidden">
+      <h2 id="projectTitle" class="project-title"></h2>
+      <div id="costSummary"></div>
+
+      <!-- ① 階層定義 -->
+      <div class="card" style="margin-bottom:16px">
+        <h3><span class="step-num">①</span>階層定義</h3>
+        <p class="hint">定義這個專案的分層方式，例如「樓層」「區域」「工種」。序號決定顯示順序。</p>
+        <div id="levelsContainer"></div>
+        <div class="inline-form">
+          <input type="number" id="newLevelIndex" placeholder="序號" min="1" style="flex:0 0 90px">
+          <input type="text" id="newLevelName" placeholder="階層名稱（例：樓層）">
+          <input type="text" id="newLevelSingular" placeholder="單數（可留空）">
+          <input type="text" id="newLevelPlural" placeholder="複數（可留空）">
+          <button onclick="createLevel()">新增階層</button>
+        </div>
+      </div>
+
+      <!-- ② 節點 -->
+      <div class="card" style="margin-bottom:16px">
+        <h3><span class="step-num">②</span>節點</h3>
+        <p class="hint">掛在階層底下的實際節點，例如「1F」→「客廳」。上層留空＝頂層節點。</p>
+        <div id="nodesContainer"></div>
+        <div class="inline-form">
+          <select id="newNodeLevel"></select>
+          <input type="text" id="newNodeName" placeholder="節點名稱（例：1F）">
+          <input type="text" id="newNodeDesc" placeholder="說明（選填）">
+          <select id="newNodeParent"></select>
+          <button onclick="createNode()">新增節點</button>
+        </div>
+      </div>
+
+      <!-- ③ 項目 -->
+      <div class="card">
+        <h3><span class="step-num">③</span>項目</h3>
+        <p class="hint">掛在節點底下的具體工作，例如「客廳」→「主牆手工塗漿」。</p>
+        <div id="itemsContainer"></div>
+        <div class="inline-form">
+          <select id="newItemNode"></select>
+          <input type="text" id="newItemTitle" placeholder="項目名稱（例：主牆手工塗漿）">
+          <input type="text" id="newItemAssignee" placeholder="負責人（選填）">
+          <input type="number" id="newItemEst" placeholder="預估費用" min="0" step="1" style="flex:0 0 120px">
+          <select id="newItemStatus">
+            <option value="">（未設定狀態）</option>
+            <option value="completed">已完成</option>
+            <option value="in_progress">進行中</option>
+            <option value="paused">暫停</option>
+          </select>
+          <button onclick="createProjectItem()">新增項目</button>
+        </div>
+        <p class="hint">費用、電話、付款狀態可以先留空，之後在項目卡片按「編輯」補上。</p>
+      </div>
+
+      <!-- ④ 專案成員 -->
+      <div class="card" style="margin-top:16px">
+        <h3><span class="step-num">④</span>專案成員</h3>
+        <p class="hint">
+          把帳號加入這個專案，並決定他能做什麼。<strong>沒被加入成員的人，即使帳號已批准登入，
+          也不能新增紀錄或改施工狀態</strong>（只能看）。
+        </p>
+        <div id="membersContainer"></div>
+        <div class="inline-form">
+          <input type="email" id="newMemberEmail" placeholder="成員的 Email（需先申請並通過審核）">
+          <select id="newMemberRole">
+            <option value="editor">編輯者｜可新增紀錄、改狀態</option>
+            <option value="viewer">檢視者｜只能看</option>
+            <option value="owner">專案管理者｜可管成員與刪除</option>
+          </select>
+          <button onclick="inviteMemberFromForm()">加入成員</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 申請審核介面 -->
+    <div id="applicationsSection" class="section hidden">
+      <h2>待審核申請</h2>
+      <div id="applicationsList"></div>
+    </div>
+  </main>
+
+  <!-- 申請審核 Modal -->
+  <div id="applicationsModal" class="modal-overlay hidden">
+    <div class="modal">
+      <button class="close-modal" onclick="closeModal()">×</button>
+      <h2>審核申請</h2>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  </div>
+  <!-- ===== /後台主體 ===== -->
+
+  <!-- Toast 放在最外層，登入頁的錯誤訊息才看得到 -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- 用相對路徑：GitHub Pages 是 /<repo>/ 子路徑，絕對路徑 /app.js 會 404 -->
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

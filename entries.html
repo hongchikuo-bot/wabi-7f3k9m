@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工程紀錄管理 — 郭先生侘寂美學空間</title>
+    <style>
+        :root {
+            --color-bg: #f5f0e8;
+            --color-text: #3d352d;
+            --color-accent: #5a4d3f;
+            --color-muted: #a8a29e;
+            --color-line: #ddd5c8;
+            --color-card: #fffdf9;
+            --font-main: -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", sans-serif;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; background: var(--color-bg); color: var(--color-text);
+            font-family: var(--font-main); line-height: 1.6;
+        }
+        header {
+            background: var(--color-card); border-bottom: 1px solid var(--color-line);
+            padding: 16px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+        }
+        header h1 { font-size: 18px; margin: 0; font-weight: 600; flex: 1; }
+        main { max-width: 720px; margin: 0 auto; padding: 20px; }
+        .card {
+            background: var(--color-card); border: 1px solid var(--color-line);
+            border-radius: 6px; padding: 20px; margin-bottom: 20px;
+        }
+        h2 { font-size: 16px; margin: 0 0 16px; font-weight: 600; }
+        label { display: block; font-size: 13px; color: var(--color-accent); margin-bottom: 4px; }
+        input[type=text], input[type=date], input[type=time], input[type=email],
+        input[type=password], input[type=url], select, textarea {
+            width: 100%; padding: 9px 10px; border: 1px solid var(--color-line);
+            border-radius: 4px; font-size: 14px; font-family: inherit;
+            background: #fff; color: var(--color-text);
+        }
+        textarea { resize: vertical; }
+        .form-group { margin-bottom: 14px; }
+        .row { display: flex; gap: 10px; }
+        .row > * { flex: 1; }
+        button {
+            background: var(--color-accent); color: #fff; border: none;
+            padding: 10px 18px; border-radius: 4px; font-size: 14px;
+            font-family: inherit; cursor: pointer;
+        }
+        button:hover { opacity: .9; }
+        button.ghost { background: transparent; color: var(--color-accent); border: 1px solid var(--color-line); }
+        button.small { padding: 5px 10px; font-size: 12px; }
+        button.danger { background: #8b2e2e; }
+        .photo-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: flex-start; }
+        .photo-row > *:first-child { flex: 2; }
+        .photo-row > *:nth-child(2) { flex: 2; }
+        .hint { font-size: 12px; color: var(--color-muted); margin-top: 4px; }
+        .check-line {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 14px; color: var(--color-text); cursor: pointer;
+        }
+        .check-line input[type=checkbox] { width: auto; flex: 0 0 auto; margin: 0; }
+        .check-line strong { color: #2e7d32; }
+        .msg { padding: 10px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 14px; }
+        .msg.error { background: #f7e4e4; color: #8b2e2e; white-space: pre-wrap; }
+        .msg.ok { background: #e4f2e4; color: #2e6b2e; }
+        .msg.info { background: #eef2f7; color: #3a4a5c; }
+        /* 該項目的最新紀錄 + 模式切換 */
+        .latest-box {
+            background: #eef2f7; border: 1px solid #d8e0ea; border-radius: 4px;
+            padding: 10px 12px; font-size: 13px; color: #3a4a5c; line-height: 1.5;
+        }
+        .latest-box strong { color: #26313d; }
+        .latest-box .hint { margin-top: 4px; }
+        .mode-tabs { display: flex; gap: 8px; margin: 10px 0 6px; }
+        .mode-tab {
+            flex: 1; background: transparent; color: var(--color-accent);
+            border: 1px solid var(--color-line); padding: 9px 12px;
+            border-radius: 4px; font-size: 13px; cursor: pointer;
+        }
+        .mode-tab:hover:not(:disabled) { background: #f6f2ea; }
+        .mode-tab.active {
+            background: var(--color-accent); color: #fff; border-color: var(--color-accent);
+        }
+        .mode-tab:disabled { opacity: .45; cursor: not-allowed; }
+        .hidden { display: none !important; }
+        .entry {
+            border-top: 1px solid var(--color-line); padding: 12px 0;
+            display: flex; gap: 12px; align-items: flex-start;
+        }
+        .entry img { width: 72px; height: 54px; object-fit: cover; border-radius: 4px; background: #eee; flex: none; }
+        .entry .body { flex: 1; min-width: 0; }
+        .entry .title { font-weight: 600; font-size: 14px; }
+        .entry .meta { font-size: 12px; color: var(--color-muted); }
+        .entry .desc { font-size: 13px; margin-top: 4px; word-break: break-word; }
+        #status { font-size: 13px; color: var(--color-muted); }
+        .drop-zone {
+            border: 2px dashed var(--color-line); border-radius: 6px;
+            padding: 22px 16px; text-align: center; cursor: pointer;
+            background: #fffdf9; transition: border-color .15s, background .15s;
+        }
+        .drop-zone:hover, .drop-zone.over { border-color: var(--color-accent); background: #f8f4ec; }
+        .drop-zone .big { display: block; font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+        .drop-zone .sub { font-size: 12px; color: var(--color-muted); }
+        .file-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+        .file-row img { width: 64px; height: 48px; object-fit: cover; border-radius: 4px; flex: none; background: #eee; }
+        .file-row input[type=text] { flex: 1; }
+        .progress { font-size: 12px; color: var(--color-accent); margin-top: 6px; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>工程紀錄管理</h1>
+        <span id="status"></span>
+        <button class="ghost hidden" id="logoutBtn">登出</button>
+    </header>
+
+    <main>
+        <!-- 登入 -->
+        <div class="card" id="loginCard">
+            <h2>請先登入</h2>
+            <div class="msg info">需要管理者或專案成員身分才能新增紀錄（資料庫的權限規則會擋下未授權的寫入）。</div>
+            <div id="loginMsg"></div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="email" autocomplete="username" placeholder="you@example.com">
+            </div>
+            <div class="form-group">
+                <label>密碼</label>
+                <input type="password" id="password" autocomplete="current-password">
+            </div>
+            <button id="loginBtn">登入</button>
+        </div>
+
+        <!-- 新增紀錄 -->
+        <div class="card hidden" id="formCard">
+            <h2>新增工程紀錄</h2>
+            <div id="formMsg"></div>
+
+            <div class="form-group">
+                <label>所屬專案 *</label>
+                <select id="project_id"><option value="">載入中…</option></select>
+            </div>
+
+            <div class="row" id="dateTimeRow">
+                <div class="form-group">
+                    <label>日期 *</label>
+                    <input type="date" id="log_date">
+                </div>
+                <div class="form-group">
+                    <label>時間</label>
+                    <input type="time" id="log_time">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>項目（選填）</label>
+                <select id="item_id"><option value="">（先選上方專案）</option></select>
+                <div class="hint">
+                    選了項目，這張照片就會進入該項目的「進度對照」時間軸。
+                    項目是在後台（<code>app.html</code>）的「③ 項目」裡建立的。
+                </div>
+            </div>
+
+            <!-- 選了項目才出現：該項目的最新紀錄 + 兩種模式 -->
+            <div id="latestWrap" class="hidden">
+                <div id="latestPanel"></div>
+                <div class="mode-tabs">
+                    <button type="button" class="mode-tab active" id="modeNew">＋ 新的進度更新</button>
+                    <button type="button" class="mode-tab" id="modeAppend">📷 補拍到上一筆</button>
+                </div>
+                <div class="hint" id="modeHint"></div>
+            </div>
+
+            <!-- 只有補拍模式才出現 -->
+            <div class="form-group hidden" id="appendNoteWrap">
+                <label>補充說明（選填）</label>
+                <textarea id="append_note" rows="2"
+                    placeholder="例：補拍同角度的收邊細節"></textarea>
+                <div class="hint">這段文字會<strong>附加</strong>到那筆紀錄的備註，不會蓋掉原本的內容。</div>
+            </div>
+
+            <div class="form-group">
+                <label>地點 / 區域 *</label>
+                <select id="node_id"><option value="">（先選上方專案）</option></select>
+                <div class="hint">
+                    只能從後台建立過的節點挑選，避免打字不一致導致前後照片對不起來。
+                    找不到你要的地點？先到後台建立節點再回來。
+                </div>
+            </div>
+
+            <div class="form-group" id="completeWrap" style="display:none">
+                <label class="check-line">
+                    <input type="checkbox" id="mark_complete">
+                    <span>這次拍攝後，這個項目<strong>已完成</strong></span>
+                </label>
+                <div class="hint">勾選後，會自動把這個項目的狀態改成「已完成」（進度以項目為準）。</div>
+            </div>
+
+            <div class="form-group">
+                <label>主描述（AI 總結 / 施工摘要）</label>
+                <textarea id="main_description" rows="3" placeholder="例：拆除完成，牆面整理中"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>發現問題</label>
+                <textarea id="issues_found" rows="2"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>解決方案 / 下一步</label>
+                <textarea id="resolution" rows="2"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>備註</label>
+                <textarea id="notes" rows="2"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>照片</label>
+                <div id="dropZone" class="drop-zone">
+                    <span class="big">📷 拍照 / 選擇照片</span>
+                    <span class="sub">點這裡選檔或開相機，也可以把圖片拖進來（可多張）</span>
+                    <input type="file" id="photoFiles" accept="image/*" multiple class="hidden">
+                </div>
+                <div id="photoPreview"></div>
+                <div id="uploadProgress" class="progress"></div>
+            </div>
+
+            <div class="form-group">
+                <label>或直接貼圖片網址</label>
+                <div id="photos"></div>
+                <button type="button" class="ghost small" id="addPhotoBtn">＋ 新增一張網址</button>
+                <div class="hint">第一張照片會顯示在公開時間軸的卡片上。</div>
+            </div>
+
+            <button id="submitBtn">新增紀錄</button>
+        </div>
+
+        <!-- 帳號設定 -->
+        <div class="card hidden" id="accountCard">
+            <h2>帳號設定</h2>
+            <div id="pwMsg"></div>
+            <div class="hint" style="margin-bottom:12px">
+                目前登入：<strong id="whoami"></strong>
+            </div>
+            <div class="form-group">
+                <label>新密碼（至少 6 碼）</label>
+                <input type="password" id="newPw" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+                <label>再次輸入新密碼</label>
+                <input type="password" id="newPw2" autocomplete="new-password">
+            </div>
+            <button id="changePwBtn">修改密碼</button>
+        </div>
+
+        <!-- 現有紀錄 -->
+        <div class="card hidden" id="listCard">
+            <h2>最近的紀錄</h2>
+            <div id="entries"></div>
+        </div>
+    </main>
+
+    <script type="module">
+        import { supabase } from './supabase-client.js';
+
+        const $ = id => document.getElementById(id);
+        const esc = v => (v === null || v === undefined) ? ''
+            : String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+        function say(elId, text, type = 'error') {
+            const el = $(elId);
+            el.innerHTML = text ? `<div class="msg ${type}">${esc(text)}</div>` : '';
+        }
+
+        // ---------- 登入 ----------
+        async function currentSession() {
+            const { data: { session } } = await supabase.auth.getSession();
+            return session;
+        }
+
+        async function signIn() {
+            const email = $('email').value.trim();
+            const password = $('password').value;
+            if (!email || !password) return say('loginMsg', '請填 Email 與密碼');
+            say('loginMsg', '登入中…', 'info');
+            const { error } = await supabase.auth.signInWithPassword({ email, password });
+            if (error) return say('loginMsg', '登入失敗：' + error.message);
+            say('loginMsg', '');
+            $('password').value = '';
+            await enterApp();
+        }
+
+        async function enterApp() {
+            $('loginCard').classList.add('hidden');
+            $('logoutBtn').classList.remove('hidden');
+            $('formCard').classList.remove('hidden');
+            $('accountCard').classList.remove('hidden');
+            $('listCard').classList.remove('hidden');
+            const { data: { user } } = await supabase.auth.getUser();
+            $('whoami').textContent = (user && user.email) || '';
+            await loadProjects();
+            await loadEntries();
+        }
+
+        function showLogin() {
+            $('loginCard').classList.remove('hidden');
+            $('formCard').classList.add('hidden');
+            $('accountCard').classList.add('hidden');
+            $('listCard').classList.add('hidden');
+            $('logoutBtn').classList.add('hidden');
+            $('status').textContent = '';
+        }
+
+        // ---------- 修改密碼 ----------
+        async function changePassword() {
+            const p1 = $('newPw').value;
+            const p2 = $('newPw2').value;
+            if (!p1 || p1.length < 6) return say('pwMsg', '新密碼至少 6 碼');
+            if (p1 !== p2) return say('pwMsg', '兩次輸入的密碼不一致');
+            say('pwMsg', '更新中…', 'info');
+            const { error } = await supabase.auth.updateUser({ password: p1 });
+            if (error) return say('pwMsg', '修改失敗：' + error.message);
+            $('newPw').value = '';
+            $('newPw2').value = '';
+            say('pwMsg', '✅ 密碼已更新。請把新密碼記在安全的地方，下次改用新密碼登入。', 'ok');
+        }
+
+        // ---------- 專案 ----------
+        async function loadProjects() {
+            const { data, error } = await supabase.from('projects').select('id, name').order('name');
+            if (error) {
+                $('project_id').innerHTML = '<option value="">（讀取專案失敗）</option>';
+                return say('formMsg', '讀取專案失敗：' + error.message + '\n（若為權限問題，請確認此帳號是專案成員或管理者）', 'error');
+            }
+            const sel = $('project_id');
+            sel.innerHTML = '<option value="">請選擇…</option>' +
+                (data || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+        }
+
+        // ---------- 專案結構：節點（地點）與項目（比對錨點）----------
+        // 節點路徑與項目資料都存成 Map，送出時直接查，不重複打 API
+        let NODE_PATHS = new Map();   // node_id  → "1F / 客廳 / 主牆"
+        let ITEMS_BY_ID = new Map();  // item_id  → { title, status, node_id }
+
+        const itemStatusLabel = s =>
+            ({ completed: '（已完成）', in_progress: '（進行中）', paused: '（暫停）' }[s] || '');
+
+        async function loadStructureOptions(projectId) {
+            const PICK = '<option value="">（先選上方專案）</option>';
+            if (!projectId) {
+                $('node_id').innerHTML = PICK;
+                $('item_id').innerHTML = PICK;
+                NODE_PATHS = new Map();
+                ITEMS_BY_ID = new Map();
+                syncCompleteCheckbox();
+                return;
+            }
+            const [lv, nd, it] = await Promise.all([
+                supabase.from('hierarchy_levels').select('*').eq('project_id', projectId).order('level_index'),
+                supabase.from('hierarchy_nodes').select('*').eq('project_id', projectId).order('sort_order'),
+                supabase.from('items').select('id, title, status, node_id').eq('project_id', projectId).order('created_at')
+            ]);
+            const err = lv.error || nd.error || it.error;
+            if (err) {
+                $('node_id').innerHTML = '<option value="">（讀取失敗）</option>';
+                $('item_id').innerHTML = '<option value="">（讀取失敗）</option>';
+                return say('formMsg', '讀取專案結構失敗：' + err.message, 'error');
+            }
+            const levels = lv.data || [], nodes = nd.data || [], items = it.data || [];
+
+            // 完整路徑：不同階層底下同名的節點才分得出來
+            const byId = new Map(nodes.map(n => [n.id, n]));
+            const pathOf = n => {
+                const parts = []; let cur = n, guard = 0;
+                while (cur && guard++ < 30) {
+                    parts.unshift(cur.name);
+                    cur = cur.parent_id ? byId.get(cur.parent_id) : null;
+                }
+                return parts.join(' / ');
+            };
+            NODE_PATHS = new Map(nodes.map(n => [n.id, pathOf(n)]));
+            ITEMS_BY_ID = new Map(items.map(i => [i.id, i]));
+
+            // 地點下拉：依階層分組（optgroup）
+            let html = nodes.length ? '<option value="">選擇地點…</option>'
+                                    : '<option value="">（此專案尚無節點，請先到後台建立）</option>';
+            for (const l of levels) {
+                const inLevel = nodes.filter(n => n.level_id === l.id);
+                if (!inLevel.length) continue;
+                html += `<optgroup label="${esc(l.name)}">` +
+                    inLevel.map(n => `<option value="${esc(n.id)}">${esc(NODE_PATHS.get(n.id))}</option>`).join('') +
+                    '</optgroup>';
+            }
+            // 萬一節點沒有對應的階層，還是要列出來，不能讓它消失
+            const orphan = nodes.filter(n => !levels.some(l => l.id === n.level_id));
+            if (orphan.length) {
+                html += orphan.map(n => `<option value="${esc(n.id)}">${esc(NODE_PATHS.get(n.id))}</option>`).join('');
+            }
+            $('node_id').innerHTML = html;
+
+            // 項目下拉：依所屬節點分組，一眼看出每個項目在哪
+            let ihtml = '<option value="">（不指定項目）</option>';
+            const groups = new Map();
+            for (const i of items) {
+                const k = i.node_id || '';
+                if (!groups.has(k)) groups.set(k, []);
+                groups.get(k).push(i);
+            }
+            for (const [nodeId, list] of groups) {
+                const label = (nodeId && NODE_PATHS.has(nodeId)) ? NODE_PATHS.get(nodeId) : '（未指定節點）';
+                ihtml += `<optgroup label="${esc(label)}">` +
+                    list.map(i => `<option value="${esc(i.id)}">${esc(i.title)}${itemStatusLabel(i.status)}</option>`).join('') +
+                    '</optgroup>';
+            }
+            $('item_id').innerHTML = ihtml;
+            syncCompleteCheckbox();
+        }
+
+        // 「這次拍攝後已完成」只在選了項目時出現（進度以項目為準）
+        function syncCompleteCheckbox() {
+            const hasItem = !!$('item_id').value;
+            $('completeWrap').style.display = hasItem ? 'block' : 'none';
+            if (!hasItem) $('mark_complete').checked = false;
+        }
+
+        // ---------- 照片：檔案（拍照 / 選檔 / 拖放）----------
+        const PHOTO_BUCKET = 'log-photos';
+        let pendingFiles = [];   // [{ file, desc }]
+
+        function renderFilePreviews() {
+            const box = $('photoPreview');
+            box.innerHTML = '';
+            pendingFiles.forEach((item, i) => {
+                const div = document.createElement('div');
+                div.className = 'file-row';
+                const thumb = URL.createObjectURL(item.file);
+                div.innerHTML = `
+                    <img src="${thumb}" alt="">
+                    <input type="text" class="f-desc" placeholder="照片描述（選填）">
+                    <button type="button" class="ghost small rm">刪除</button>`;
+                const descInput = div.querySelector('.f-desc');
+                descInput.value = item.desc || '';
+                descInput.oninput = e => { pendingFiles[i].desc = e.target.value; };
+                div.querySelector('.rm').onclick = () => {
+                    URL.revokeObjectURL(thumb);
+                    pendingFiles.splice(i, 1);
+                    renderFilePreviews();
+                    $('uploadProgress').textContent = pendingFiles.length ? `已選 ${pendingFiles.length} 張照片` : '';
+                };
+                box.appendChild(div);
+            });
+        }
+
+        function addFiles(fileList) {
+            let added = 0;
+            for (const f of fileList) {
+                if (!String(f.type || '').startsWith('image/')) continue;
+                pendingFiles.push({ file: f, desc: '' });
+                added++;
+            }
+            renderFilePreviews();
+            if (added) {
+                $('uploadProgress').textContent = `已選 ${pendingFiles.length} 張照片`;
+            } else if (fileList.length) {
+                say('formMsg', '只能上傳圖片檔', 'error');
+            }
+        }
+
+        async function uploadPendingFiles(projectId) {
+            const rows = [];
+            let done = 0;
+            for (const item of pendingFiles) {
+                const ext = (item.file.name.split('.').pop() || 'jpg').toLowerCase().slice(0, 5);
+                const path = `${projectId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+                const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, item.file, {
+                    cacheControl: '31536000',
+                    upsert: false,
+                    contentType: item.file.type || 'image/jpeg'
+                });
+                if (error) throw new Error(`（${item.file.name}）${error.message}`);
+                const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+                rows.push({ photo_url: data.publicUrl, photo_description: item.desc || null });
+                done++;
+                $('uploadProgress').textContent = `上傳中 ${done}/${pendingFiles.length}…`;
+            }
+            return rows;
+        }
+
+        // ---------- 照片列（網址）----------
+        function addPhotoRow(url = '', desc = '') {
+            const div = document.createElement('div');
+            div.className = 'photo-row';
+            div.innerHTML = `
+                <input type="url" class="p-url" placeholder="https://…/photo.jpg" value="${esc(url)}">
+                <input type="text" class="p-desc" placeholder="照片描述" value="${esc(desc)}">
+                <button type="button" class="ghost small rm">刪除</button>`;
+            div.querySelector('.rm').onclick = () => div.remove();
+            $('photos').appendChild(div);
+        }
+
+        function collectPhotos() {
+            return [...document.querySelectorAll('#photos .photo-row')]
+                .map(r => ({
+                    photo_url: r.querySelector('.p-url').value.trim(),
+                    photo_description: r.querySelector('.p-desc').value.trim() || null
+                }))
+                .filter(p => p.photo_url);
+        }
+
+        // ---------- 該項目的最新紀錄 + 兩種模式（新進度 / 補拍）----------
+        // 同一個工作事項有兩種情境，以前分不出來、都會變成兩筆紀錄：
+        //   ① 新的進度更新 → 建立新紀錄（時間軸多一個點，形成前後對照）
+        //   ② 補拍到上一筆 → 只把照片掛到既有紀錄（不新增紀錄、時間軸不變）
+        let CURRENT_MODE = 'new';
+        let APPEND_TARGET = null;      // 要補拍的那筆 project_logs
+        let APPEND_PHOTO_COUNT = 0;
+
+        const fgOf = id => { const el = $(id); return el ? el.closest('.form-group') : null; };
+        const setHidden = (el, hide) => { if (el) el.classList.toggle('hidden', !!hide); };
+
+        async function loadLatestLogForItem(itemId) {
+            APPEND_TARGET = null;
+            APPEND_PHOTO_COUNT = 0;
+            if (!itemId) {
+                $('latestWrap').classList.add('hidden');
+                setMode('new');
+                return;
+            }
+            const { data, error } = await supabase
+                .from('project_logs')
+                .select('id, log_date, log_time, location, main_description, notes, log_photos(id)')
+                .eq('item_id', itemId)
+                .order('log_date', { ascending: false })
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            $('latestWrap').classList.remove('hidden');
+
+            if (error) {
+                $('latestPanel').innerHTML =
+                    `<div class="msg error">讀取此項目的紀錄失敗：${esc(error.message)}</div>`;
+                $('modeAppend').disabled = true;
+                setMode('new');
+                return;
+            }
+
+            const latest = (data || [])[0];
+            const item = ITEMS_BY_ID.get(itemId) || {};
+            const st = { completed: '已完成', in_progress: '進行中', paused: '暫停' }[item.status] || '未設定';
+
+            if (!latest) {
+                $('latestPanel').innerHTML =
+                    `<div class="latest-box">此項目<strong>尚無紀錄</strong>（目前狀態：${esc(st)}）。
+                     這一筆會是它的<strong>起點</strong>。</div>`;
+                $('modeAppend').disabled = true;
+                setMode('new');
+                return;
+            }
+
+            APPEND_TARGET = latest;
+            APPEND_PHOTO_COUNT = (latest.log_photos || []).length;
+            $('modeAppend').disabled = false;
+            const t = latest.log_time ? ' ' + String(latest.log_time).slice(0, 5) : '';
+            $('latestPanel').innerHTML = `<div class="latest-box">
+                此項目狀態：<strong>${esc(st)}</strong>
+                ｜ 最新紀錄：<strong>${esc(latest.log_date)}</strong>${esc(t)}
+                ${latest.location ? '｜ ' + esc(latest.location) : ''}
+                ｜ 已有 <strong>${APPEND_PHOTO_COUNT}</strong> 張照片
+                ${latest.main_description
+                    ? `<div class="hint">${esc(String(latest.main_description).slice(0, 60))}</div>` : ''}
+            </div>`;
+            setMode(CURRENT_MODE);
+        }
+
+        // 切換模式：補拍模式只送照片，所以把「新紀錄」才需要的欄位收起來
+        function setMode(mode) {
+            if (mode === 'append' && !APPEND_TARGET) mode = 'new';
+            CURRENT_MODE = mode;
+            const append = mode === 'append';
+
+            $('modeNew').classList.toggle('active', !append);
+            $('modeAppend').classList.toggle('active', append);
+
+            setHidden($('dateTimeRow'), append);
+            setHidden(fgOf('node_id'), append);
+            setHidden($('completeWrap'), append);
+            ['main_description', 'issues_found', 'resolution', 'notes']
+                .forEach(id => setHidden(fgOf(id), append));
+            setHidden($('appendNoteWrap'), !append);
+
+            const t = (APPEND_TARGET && APPEND_TARGET.log_date) || '';
+            $('modeHint').innerHTML = append
+                ? `📷 <strong>補拍模式</strong>：照片會加到 <strong>${esc(t)}</strong> 那筆紀錄
+                   （不新增紀錄、時間軸不變）。`
+                : '記錄一個<strong>新的時間點</strong>（會新增一筆紀錄，形成進度對照）。';
+            $('submitBtn').textContent = append ? '補上照片到這筆紀錄' : '新增紀錄';
+        }
+
+        // ---------- 補拍：只把照片掛到既有紀錄 ----------
+        async function submitAppend() {
+            const projectId = $('project_id').value;
+            if (!APPEND_TARGET) return say('formMsg', '請先選擇要補拍的項目');
+            if (!pendingFiles.length && !collectPhotos().length) {
+                return say('formMsg', '補拍模式至少要選一張照片（或貼一個圖片網址）');
+            }
+            $('submitBtn').disabled = true;
+            say('formMsg', '處理照片中…', 'info');
+
+            let filePhotos = [];
+            if (pendingFiles.length) {
+                try {
+                    filePhotos = await uploadPendingFiles(projectId);
+                } catch (err) {
+                    $('submitBtn').disabled = false;
+                    $('uploadProgress').textContent = '';
+                    return say('formMsg', '照片上傳失敗：' + err.message);
+                }
+            }
+            const photos = [...filePhotos, ...collectPhotos()];
+
+            // sort_order 接在既有照片後面，維持「起點 → 最新」的順序
+            const { count } = await supabase
+                .from('log_photos')
+                .select('id', { count: 'exact', head: true })
+                .eq('log_id', APPEND_TARGET.id);
+            const base = count || 0;
+
+            const { error } = await supabase.from('log_photos').insert(
+                photos.map((p, i) => ({ ...p, log_id: APPEND_TARGET.id, sort_order: base + i }))
+            );
+            if (error) {
+                $('submitBtn').disabled = false;
+                let extra = '';
+                if (error.code === '42501' || /row-level security/i.test(error.message || '')) {
+                    extra = '\n\n→ 資料庫權限擋下：只有 admin 或該專案的 owner / editor 能補照片。';
+                }
+                return say('formMsg', '照片寫入失敗：' + error.message + extra);
+            }
+
+            // 補充說明 → 附加到該筆紀錄的備註（不覆蓋原本的內容）
+            const noteText = ($('append_note') ? $('append_note').value : '').trim();
+            let noteNote = '';
+            if (noteText) {
+                const prev = APPEND_TARGET.notes || '';
+                const merged = prev ? prev + '\n' + noteText : noteText;
+                const { error: ne } = await supabase.from('project_logs')
+                    .update({ notes: merged }).eq('id', APPEND_TARGET.id);
+                noteNote = ne ? `（但備註更新失敗：${ne.message}）` : '，並附加了補充說明';
+            }
+            if ($('append_note')) $('append_note').value = '';
+
+            const targetDate = APPEND_TARGET.log_date;
+            $('submitBtn').disabled = false;
+            say('formMsg',
+                `✅ 已補上 ${photos.length} 張照片到 ${targetDate} 的那筆紀錄${noteNote}。`
+                + '沒有新增紀錄，時間軸不變。', 'ok');
+            clearForm();
+            await loadEntries();
+            await loadLatestLogForItem($('item_id').value);
+            await loadStructureOptions($('project_id').value);
+        }
+
+        // ---------- 新增紀錄 ----------
+        async function submitEntry() {
+            const projectId = $('project_id').value;
+            const logDate = $('log_date').value;
+            const nodeId = $('node_id').value;
+            const itemId = $('item_id').value;
+            const markComplete = !!$('mark_complete').checked;
+            if (!projectId) return say('formMsg', '請選擇所屬專案');
+            if (!logDate) return say('formMsg', '請選擇日期');
+            if (!nodeId) return say('formMsg', '請選擇地點（地點只能從後台建立過的節點挑選）');
+
+            // 進度以「項目」為準：這筆紀錄的狀態 = 送出當下該項目的狀態
+            // （勾了「這次拍攝後已完成」就記為已完成）
+            const itemRow = itemId ? ITEMS_BY_ID.get(itemId) : null;
+            const statusForLog = itemRow ? (markComplete ? 'completed' : (itemRow.status || null)) : null;
+
+            const payload = {
+                project_id: projectId,
+                log_date: logDate,
+                node_id: nodeId,
+                item_id: itemId || null,
+                // location 存「當下的完整路徑」：日後節點改名或刪除，這行字仍是歷史痕跡
+                location: NODE_PATHS.get(nodeId) || null,
+                main_description: $('main_description').value.trim() || null,
+                progress_status: statusForLog,
+                issues_found: $('issues_found').value.trim() || null,
+                resolution: $('resolution').value.trim() || null,
+                notes: $('notes').value.trim() || null
+            };
+
+            // log_time 是 NOT NULL（有 DEFAULT CURRENT_TIME）：
+            // 留空時「不要送這個欄位」，讓資料庫套用預設值。送 null 會違反 NOT NULL。
+            const logTime = $('log_time').value;
+            if (logTime) payload.log_time = logTime;
+
+            $('submitBtn').disabled = true;
+
+            // 先上傳檔案照片：失敗就停住，不留半筆紀錄
+            let filePhotos = [];
+            if (pendingFiles.length) {
+                say('formMsg', '上傳照片中…', 'info');
+                try {
+                    filePhotos = await uploadPendingFiles(projectId);
+                } catch (err) {
+                    $('submitBtn').disabled = false;
+                    $('uploadProgress').textContent = '';
+                    let extra = '';
+                    if (/bucket/i.test(err.message)) {
+                        extra = `\n\n→ Supabase Storage 可能還沒建立 bucket「${PHOTO_BUCKET}」。`;
+                    } else if (/policy|row-level security|unauthorized|forbidden/i.test(err.message)) {
+                        extra = '\n\n→ Storage 的上傳權限（policy）還沒設定。';
+                    }
+                    return say('formMsg', '照片上傳失敗：' + err.message + extra);
+                }
+            }
+
+            const photos = [...filePhotos, ...collectPhotos()];
+            say('formMsg', '寫入紀錄中…', 'info');
+
+            const { data: log, error } = await supabase
+                .from('project_logs').insert([payload]).select().single();
+
+            if (error) {
+                $('submitBtn').disabled = false;
+                let extra = '';
+                if (error.code === '42501' || /row-level security/i.test(error.message || '')) {
+                    extra = '\n\n→ 這是資料庫權限規則擋下的。請確認：\n' +
+                            '  1) 你的帳號 global role 是 admin，或\n' +
+                            '  2) 你是這個專案的 owner / editor 成員';
+                }
+                return say('formMsg', '寫入失敗：' + error.message + extra);
+            }
+
+            if (photos.length) {
+                const { error: pErr } = await supabase.from('log_photos')
+                    .insert(photos.map(p => ({ ...p, log_id: log.id })));
+                if (pErr) {
+                    $('submitBtn').disabled = false;
+                    return say('formMsg',
+                        `紀錄已建立（${log.log_date}），但照片寫入失敗：${pErr.message}\n` +
+                        '可稍後再補照片。', 'error');
+                }
+            }
+
+            // 勾了「這次拍攝後已完成」→ 順手把項目結案（進度以項目為準）
+            let extra = '', hadErr = false;
+            if (itemId && markComplete) {
+                const { error: ue } = await supabase.from('items')
+                    .update({ status: 'completed' }).eq('id', itemId);
+                if (ue) { extra = `\n⚠️ 紀錄已存，但項目狀態更新失敗：${ue.message}`; hadErr = true; }
+                else extra = '，項目已標記為「已完成」';
+            }
+
+            $('submitBtn').disabled = false;
+            say('formMsg', `✅ 已新增 1 筆紀錄${photos.length ? ` 與 ${photos.length} 張照片` : ''}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
+            clearForm();
+            await loadEntries();
+            await loadStructureOptions($('project_id').value);   // 更新項目的狀態標籤
+        }
+
+        function clearForm() {
+            ['main_description', 'issues_found', 'resolution', 'notes'].forEach(id => {
+                if ($(id)) $(id).value = '';
+            });
+            ['log_time', 'item_id', 'node_id'].forEach(id => {
+                if ($(id)) $(id).value = '';
+            });
+            if ($('mark_complete')) $('mark_complete').checked = false;
+            syncCompleteCheckbox();
+            $('photos').innerHTML = '';
+            addPhotoRow();
+            pendingFiles = [];
+            renderFilePreviews();
+            $('uploadProgress').textContent = '';
+        }
+
+        // ---------- 現有紀錄 ----------
+        let entryList = [];
+
+        async function loadEntries() {
+            const { data, error } = await supabase
+                .from('project_logs')
+                .select('id, log_date, location, main_description, progress_status, item_id, node_id, log_photos(photo_url, photo_description), items(title)')
+                .order('log_date', { ascending: false })
+                .limit(20);
+
+            if (error) {
+                $('entries').innerHTML = `<div class="msg error">讀取失敗：${esc(error.message)}</div>`;
+                return;
+            }
+            entryList = data || [];
+            if (!entryList.length) {
+                $('entries').innerHTML = '<div class="hint">目前尚無紀錄。</div>';
+                return;
+            }
+            const statusLabel = { completed: '已完成', in_progress: '進行中', paused: '暫停' };
+            $('entries').innerHTML = entryList.map(e => {
+                const photo = (e.log_photos && e.log_photos[0]) || {};
+                const itemTitle = (e.items && e.items.title) || '';
+                const metaBits = [
+                    itemTitle,
+                    statusLabel[e.progress_status] || '',
+                    photo.photo_description || ''
+                ].filter(Boolean);
+                return `
+                <div class="entry">
+                    <img src="${esc(photo.photo_url || '')}" alt="" onerror="this.style.visibility='hidden'">
+                    <div class="body">
+                        <div class="title">${esc(e.log_date)} · ${esc(e.location || '未標記位置')}</div>
+                        <div class="meta">${esc(metaBits.join(' · '))}</div>
+                        <div class="desc">${esc(e.main_description || '')}</div>
+                    </div>
+                    <button class="danger small" data-del="${esc(e.id)}">刪除</button>
+                </div>`;
+            }).join('');
+
+            document.querySelectorAll('[data-del]').forEach(btn => {
+                btn.onclick = () => deleteEntry(btn.getAttribute('data-del'));
+            });
+        }
+
+        // 從 Storage 公開網址取出物件路徑；外部貼上的網址回傳 null（不能亂刪）
+        function storagePath(url) {
+            if (!url) return null;
+            const marker = `/storage/v1/object/public/${PHOTO_BUCKET}/`;
+            const i = String(url).indexOf(marker);
+            if (i === -1) return null;
+            return decodeURIComponent(String(url).slice(i + marker.length).split('?')[0]);
+        }
+
+        async function deleteEntry(id) {
+            // 確認訊息必須顯示「是哪一筆」，避免刪錯
+            const e = entryList.find(x => x.id === id) || {};
+            const n = (e.log_photos || []).length;
+            const label = [e.log_date, e.location].filter(Boolean).join(' · ') || '(無標題)';
+            const ok = confirm(
+                `確定要刪除這一筆嗎？\n\n` +
+                `  紀錄：${label}\n` +
+                (e.main_description ? `  內文：${String(e.main_description).slice(0, 40)}\n` : '') +
+                `  照片：${n} 張\n\n` +
+                `紀錄與照片都會永久刪除，無法復原。`
+            );
+            if (!ok) return;
+
+            // 先查出照片，刪 Storage 檔案，再刪紀錄。
+            // 順序很重要：先刪紀錄就查不到照片網址了，檔案會變孤兒。
+            const { data: photos, error: pErr } = await supabase
+                .from('log_photos').select('photo_url').eq('log_id', id);
+            if (pErr) return say('formMsg', '查詢照片失敗：' + pErr.message);
+
+            const paths = (photos || []).map(p => storagePath(p.photo_url)).filter(Boolean);
+            let fileNote = '';
+            if (paths.length) {
+                const { data: removed, error: sErr } = await supabase.storage
+                    .from(PHOTO_BUCKET).remove(paths);
+                const n = (removed || []).length;
+                if (sErr) {
+                    fileNote = `（但 ${paths.length} 個照片檔刪除失敗：${sErr.message}）`;
+                } else if (n < paths.length) {
+                    // 注意：缺少 Storage 的 DELETE 政策時，remove() 不會報錯，
+                    // 只會回傳空陣列。所以必須自己比對數量，不能只看 error。
+                    fileNote = `（但只有 ${n}/${paths.length} 個照片檔真的被刪除 —— Storage 可能缺少 DELETE 政策）`;
+                } else {
+                    fileNote = `，並刪除 ${n} 個照片檔`;
+                }
+            }
+
+            const { error } = await supabase.from('project_logs').delete().eq('id', id);
+            if (error) return say('formMsg', '刪除失敗：' + error.message);
+            say('formMsg', `已刪除紀錄${fileNote}。`, fileNote.includes('失敗') ? 'error' : 'ok');
+            await loadEntries();
+        }
+
+        // ---------- 綁定 ----------
+        $('loginBtn').onclick = signIn;
+        $('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+        $('addPhotoBtn').onclick = () => addPhotoRow();
+        // 一顆送出鈕，依目前模式決定是「新增紀錄」還是「補照片到既有紀錄」
+        $('submitBtn').onclick = () => (CURRENT_MODE === 'append' ? submitAppend() : submitEntry());
+        $('changePwBtn').onclick = changePassword;
+        $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); showLogin(); };
+
+        // 模式切換
+        $('modeNew').onclick = () => setMode('new');
+        $('modeAppend').onclick = () => setMode('append');
+
+        // 換專案 → 重載該專案的節點與項目，並清掉上一個專案的「最新紀錄」面板
+        $('project_id').addEventListener('change', async () => {
+            await loadStructureOptions($('project_id').value);
+            await loadLatestLogForItem('');   // 隱藏面板、回到「新的進度更新」模式
+        });
+        // 選了項目 → 帶出它所在的節點（地點）、顯示最新紀錄與模式切換
+        $('item_id').addEventListener('change', async () => {
+            const row = ITEMS_BY_ID.get($('item_id').value);
+            if (row && row.node_id && NODE_PATHS.has(row.node_id)) {
+                $('node_id').value = row.node_id;
+            }
+            syncCompleteCheckbox();
+            await loadLatestLogForItem($('item_id').value);
+        });
+
+        // 拍照 / 選檔 / 拖放
+        $('dropZone').onclick = () => $('photoFiles').click();
+        $('photoFiles').addEventListener('change', e => {
+            addFiles(e.target.files);
+            e.target.value = '';   // 允許重選同一個檔案
+        });
+        ['dragenter', 'dragover'].forEach(t => $('dropZone').addEventListener(t, e => {
+            e.preventDefault();
+            $('dropZone').classList.add('over');
+        }));
+        ['dragleave', 'drop'].forEach(t => $('dropZone').addEventListener(t, e => {
+            e.preventDefault();
+            $('dropZone').classList.remove('over');
+        }));
+        $('dropZone').addEventListener('drop', e => {
+            if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+        });
+
+        (async function init() {
+            const today = new Date();
+            $('log_date').value = today.toISOString().slice(0, 10);
+            $('status').textContent = '檢查登入狀態…';
+            const session = await currentSession();
+            if (session) {
+                $('status').textContent = session.user.email || '';
+                await enterApp();
+            } else {
+                showLogin();
+            }
+        })();
+    </script>
+</body>
+</html>
