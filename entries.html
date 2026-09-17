@@ -64,6 +64,38 @@
         .msg.error { background: #f7e4e4; color: #8b2e2e; white-space: pre-wrap; }
         .msg.ok { background: #e4f2e4; color: #2e6b2e; }
         .msg.info { background: #eef2f7; color: #3a4a5c; }
+        /* 編輯既有紀錄 */
+        .entry-actions { display: flex; flex-direction: column; gap: 6px; flex: none; }
+        .edit-block {
+            background: #fffdf7; border: 1px solid #e8ddc8; border-radius: 4px;
+            padding: 12px; margin-top: 10px;
+        }
+        .edit-block .ef-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        .edit-block label { font-size: 12px; margin-bottom: 3px; }
+        .edit-block input, .edit-block select, .edit-block textarea {
+            font-size: 13px; padding: 7px 8px;
+        }
+        .edit-block .full { grid-column: 1 / -1; }
+        .edit-actions { display: flex; gap: 8px; margin-top: 12px; }
+        .photo-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+        .photo-item {
+            border: 1px solid var(--color-line); border-radius: 4px; padding: 6px;
+            width: 118px; background: #fff;
+        }
+        .photo-item img {
+            width: 100%; height: 72px; object-fit: cover; border-radius: 3px; display: block;
+            background: #eee;
+        }
+        .photo-item .pdesc {
+            font-size: 11px; color: var(--color-muted); margin: 4px 0;
+            word-break: break-word; line-height: 1.35;
+        }
+        .photo-item button { width: 100%; padding: 4px 0; font-size: 11px; }
+        .sub-label { font-size: 12px; color: var(--color-accent); margin-top: 12px; }
+
         /* 該項目的最新紀錄 + 模式切換 */
         .latest-box {
             background: #eef2f7; border: 1px solid #d8e0ea; border-radius: 4px;
@@ -258,6 +290,7 @@
         <!-- 現有紀錄 -->
         <div class="card hidden" id="listCard">
             <h2>最近的紀錄</h2>
+            <div id="listMsg"></div>
             <div id="entries"></div>
         </div>
     </main>
@@ -348,29 +381,16 @@
         const itemStatusLabel = s =>
             ({ completed: '（已完成）', in_progress: '（進行中）', paused: '（暫停）' }[s] || '');
 
-        async function loadStructureOptions(projectId) {
-            const PICK = '<option value="">（先選上方專案）</option>';
-            if (!projectId) {
-                $('node_id').innerHTML = PICK;
-                $('item_id').innerHTML = PICK;
-                NODE_PATHS = new Map();
-                ITEMS_BY_ID = new Map();
-                syncCompleteCheckbox();
-                return;
-            }
+        // 取得某專案的結構（節點完整路徑 + 項目），供「地點/項目下拉」與「編輯紀錄」共用
+        async function fetchStructure(projectId) {
             const [lv, nd, it] = await Promise.all([
                 supabase.from('hierarchy_levels').select('*').eq('project_id', projectId).order('level_index'),
                 supabase.from('hierarchy_nodes').select('*').eq('project_id', projectId).order('sort_order'),
                 supabase.from('items').select('id, title, status, node_id').eq('project_id', projectId).order('created_at')
             ]);
             const err = lv.error || nd.error || it.error;
-            if (err) {
-                $('node_id').innerHTML = '<option value="">（讀取失敗）</option>';
-                $('item_id').innerHTML = '<option value="">（讀取失敗）</option>';
-                return say('formMsg', '讀取專案結構失敗：' + err.message, 'error');
-            }
+            if (err) throw new Error(err.message);
             const levels = lv.data || [], nodes = nd.data || [], items = it.data || [];
-
             // 完整路徑：不同階層底下同名的節點才分得出來
             const byId = new Map(nodes.map(n => [n.id, n]));
             const pathOf = n => {
@@ -381,8 +401,33 @@
                 }
                 return parts.join(' / ');
             };
-            NODE_PATHS = new Map(nodes.map(n => [n.id, pathOf(n)]));
-            ITEMS_BY_ID = new Map(items.map(i => [i.id, i]));
+            return {
+                levels, nodes, items,
+                nodePaths: new Map(nodes.map(n => [n.id, pathOf(n)]))
+            };
+        }
+
+        async function loadStructureOptions(projectId) {
+            const PICK = '<option value="">（先選上方專案）</option>';
+            if (!projectId) {
+                $('node_id').innerHTML = PICK;
+                $('item_id').innerHTML = PICK;
+                NODE_PATHS = new Map();
+                ITEMS_BY_ID = new Map();
+                syncCompleteCheckbox();
+                return;
+            }
+            let levels, nodes, items;
+            try {
+                const s = await fetchStructure(projectId);
+                levels = s.levels; nodes = s.nodes; items = s.items;
+                NODE_PATHS = s.nodePaths;
+                ITEMS_BY_ID = new Map(items.map(i => [i.id, i]));
+            } catch (err) {
+                $('node_id').innerHTML = '<option value="">（讀取失敗）</option>';
+                $('item_id').innerHTML = '<option value="">（讀取失敗）</option>';
+                return say('formMsg', '讀取專案結構失敗：' + err.message, 'error');
+            }
 
             // 地點下拉：依階層分組（optgroup）
             let html = nodes.length ? '<option value="">選擇地點…</option>'
@@ -779,13 +824,18 @@
             $('uploadProgress').textContent = '';
         }
 
-        // ---------- 現有紀錄 ----------
+        // ---------- 現有紀錄（含編輯 / 刪除單張照片）----------
         let entryList = [];
+        let editingEntryId = null;   // 正在編輯哪一筆（null = 沒在編輯）
+        let editStruct = null;       // 該筆所屬專案的結構（地點/項目下拉用）
+        const statusLabel = { completed: '已完成', in_progress: '進行中', paused: '暫停' };
 
         async function loadEntries() {
             const { data, error } = await supabase
                 .from('project_logs')
-                .select('id, log_date, location, main_description, progress_status, item_id, node_id, log_photos(photo_url, photo_description), items(title)')
+                .select('id, log_date, log_time, location, main_description, progress_status, '
+                       + 'issues_found, resolution, notes, project_id, item_id, node_id, '
+                       + 'log_photos(id, photo_url, photo_description, sort_order), items(title)')
                 .order('log_date', { ascending: false })
                 .limit(20);
 
@@ -794,19 +844,19 @@
                 return;
             }
             entryList = data || [];
+            renderEntries();
+        }
+
+        function renderEntries() {
+            const box = $('entries');
             if (!entryList.length) {
-                $('entries').innerHTML = '<div class="hint">目前尚無紀錄。</div>';
+                box.innerHTML = '<div class="hint">目前尚無紀錄。</div>';
                 return;
             }
-            const statusLabel = { completed: '已完成', in_progress: '進行中', paused: '暫停' };
-            $('entries').innerHTML = entryList.map(e => {
+            box.innerHTML = entryList.map(e => {
                 const photo = (e.log_photos && e.log_photos[0]) || {};
                 const itemTitle = (e.items && e.items.title) || '';
-                const metaBits = [
-                    itemTitle,
-                    statusLabel[e.progress_status] || '',
-                    photo.photo_description || ''
-                ].filter(Boolean);
+                const metaBits = [itemTitle, statusLabel[e.progress_status] || ''].filter(Boolean);
                 return `
                 <div class="entry">
                     <img src="${esc(photo.photo_url || '')}" alt="" onerror="this.style.visibility='hidden'">
@@ -814,14 +864,156 @@
                         <div class="title">${esc(e.log_date)} · ${esc(e.location || '未標記位置')}</div>
                         <div class="meta">${esc(metaBits.join(' · '))}</div>
                         <div class="desc">${esc(e.main_description || '')}</div>
+                        ${editingEntryId === e.id ? renderEditForm(e) : ''}
                     </div>
-                    <button class="danger small" data-del="${esc(e.id)}">刪除</button>
+                    <div class="entry-actions">
+                        <button class="ghost small" data-edit="${esc(e.id)}">編輯</button>
+                        <button class="danger small" data-del="${esc(e.id)}">刪除</button>
+                    </div>
                 </div>`;
             }).join('');
 
-            document.querySelectorAll('[data-del]').forEach(btn => {
+            box.querySelectorAll('[data-del]').forEach(btn => {
                 btn.onclick = () => deleteEntry(btn.getAttribute('data-del'));
             });
+            box.querySelectorAll('[data-edit]').forEach(btn => {
+                btn.onclick = () => startEditEntry(btn.getAttribute('data-edit'));
+            });
+            const cancel = box.querySelector('[data-cancel-edit]');
+            if (cancel) cancel.onclick = () => { editingEntryId = null; renderEntries(); };
+            const save = box.querySelector('[data-save-edit]');
+            if (save) save.onclick = () => saveEntryEdit(save.getAttribute('data-save-edit'));
+            box.querySelectorAll('[data-del-photo]').forEach(btn => {
+                btn.onclick = () => deletePhoto(
+                    btn.getAttribute('data-photo-log'),
+                    btn.getAttribute('data-del-photo'),
+                    btn.getAttribute('data-photo-url')
+                );
+            });
+        }
+
+        // 編輯表單：地點與項目一樣用下拉（跟新增時同一套選項，避免打字不一致）
+        function renderEditForm(e) {
+            const s = editStruct;
+            const nodeOpts = ['<option value="">（未指定）</option>'].concat(
+                s ? s.nodes.map(n =>
+                    `<option value="${esc(n.id)}"${n.id === e.node_id ? ' selected' : ''}>`
+                    + `${esc(s.nodePaths.get(n.id))}</option>`) : []
+            ).join('');
+            const itemOpts = ['<option value="">（未指定）</option>'].concat(
+                s ? s.items.map(i =>
+                    `<option value="${esc(i.id)}"${i.id === e.item_id ? ' selected' : ''}>`
+                    + `${esc(i.title)}</option>`) : []
+            ).join('');
+            const photos = (e.log_photos || []).slice()
+                .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+            const photoHtml = photos.length
+                ? `<div class="photo-grid">${photos.map(p => `
+                    <div class="photo-item">
+                        <img src="${esc(p.photo_url)}" alt="" onerror="this.style.visibility='hidden'">
+                        <div class="pdesc">${esc(p.photo_description || '（無描述）')}</div>
+                        <button class="danger small"
+                            data-del-photo="${esc(p.id)}"
+                            data-photo-log="${esc(e.id)}"
+                            data-photo-url="${esc(p.photo_url)}">刪除照片</button>
+                    </div>`).join('')}</div>`
+                : '<div class="hint">這筆沒有照片。</div>';
+
+            const t = e.log_time ? String(e.log_time).slice(0, 5) : '';
+            return `
+            <div class="edit-block">
+                <div class="ef-grid">
+                    <div><label>日期</label><input type="date" id="ee-date" value="${esc(e.log_date)}"></div>
+                    <div><label>時間</label><input type="time" id="ee-time" value="${esc(t)}"></div>
+                    <div><label>項目</label><select id="ee-item">${itemOpts}</select></div>
+                    <div><label>地點</label><select id="ee-node">${nodeOpts}</select></div>
+                    <div class="full"><label>主描述</label>
+                        <textarea id="ee-desc" rows="2">${esc(e.main_description || '')}</textarea></div>
+                    <div class="full"><label>發現問題</label>
+                        <textarea id="ee-issues" rows="2">${esc(e.issues_found || '')}</textarea></div>
+                    <div class="full"><label>解決方案 / 下一步</label>
+                        <textarea id="ee-resolution" rows="2">${esc(e.resolution || '')}</textarea></div>
+                    <div class="full"><label>備註</label>
+                        <textarea id="ee-notes" rows="2">${esc(e.notes || '')}</textarea></div>
+                </div>
+                <div class="sub-label">照片（${photos.length} 張）</div>
+                ${photoHtml}
+                <div class="edit-actions">
+                    <button data-save-edit="${esc(e.id)}">儲存</button>
+                    <button class="ghost" data-cancel-edit="${esc(e.id)}">取消</button>
+                </div>
+            </div>`;
+        }
+
+        async function startEditEntry(id) {
+            const e = entryList.find(x => x.id === id);
+            if (!e) return;
+            editStruct = null;
+            try {
+                editStruct = await fetchStructure(e.project_id);
+            } catch (err) {
+                say('listMsg', '讀取該專案的節點／項目失敗，地點與項目下拉會是空的：' + err.message, 'error');
+            }
+            editingEntryId = id;
+            renderEntries();
+        }
+
+        const valOrNull = id => { const el = $(id); return el ? (el.value.trim() || null) : null; };
+
+        async function saveEntryEdit(id) {
+            const e = entryList.find(x => x.id === id);
+            if (!e) return;
+            const nodeId = $('ee-node').value || null;
+            const payload = {
+                log_date: $('ee-date').value || e.log_date,
+                node_id: nodeId,
+                item_id: $('ee-item').value || null,
+                // location 存「當下的完整路徑」：節點日後改名或刪除，這行字仍是歷史痕跡
+                location: nodeId && editStruct ? (editStruct.nodePaths.get(nodeId) || null) : null,
+                main_description: valOrNull('ee-desc'),
+                issues_found: valOrNull('ee-issues'),
+                resolution: valOrNull('ee-resolution'),
+                notes: valOrNull('ee-notes')
+            };
+            // log_time 是 NOT NULL：留空時「不要送這個欄位」，保留原本的值
+            const t = $('ee-time').value;
+            if (t) payload.log_time = t;
+
+            const { error } = await supabase.from('project_logs').update(payload).eq('id', id);
+            if (error) {
+                let extra = '';
+                if (error.code === '42501' || /row-level security/i.test(error.message || '')) {
+                    extra = '\n\n→ 資料庫權限擋下：只有 admin 或該專案的 owner / editor 能修改紀錄。';
+                }
+                return say('listMsg', '儲存失敗：' + error.message + extra);
+            }
+            editingEntryId = null;
+            say('listMsg', '✅ 紀錄已更新。公開頁面重新整理即可看到。', 'ok');
+            await loadEntries();
+            await loadLatestLogForItem($('item_id').value);
+        }
+
+        // 刪除單張照片（Storage 檔案 + log_photos 那一列）
+        async function deletePhoto(logId, photoId, photoUrl) {
+            if (!photoId) return;
+            if (!confirm('確定要刪除這張照片嗎？\n\n檔案會從 Storage 一起刪掉，無法復原。')) return;
+            const p = storagePath(photoUrl);
+            let fileNote = '';
+            if (p) {
+                const { data: removed, error: sErr } = await supabase.storage
+                    .from(PHOTO_BUCKET).remove([p]);
+                const n = (removed || []).length;
+                if (sErr) fileNote = `（但 Storage 檔案刪除失敗：${sErr.message}）`;
+                else if (n < 1) fileNote = '（但 Storage 檔案沒有真的刪掉 —— 可能缺少 DELETE 政策）';
+            }
+            const { error } = await supabase.from('log_photos').delete().eq('id', photoId);
+            if (error) return say('listMsg', '刪除照片失敗：' + error.message);
+            const e = entryList.find(x => x.id === logId);
+            if (e) e.log_photos = (e.log_photos || []).filter(x => x.id !== photoId);
+            say('listMsg', `已刪除 1 張照片${fileNote}。`,
+                (fileNote.includes('失敗') || fileNote.includes('沒有真的')) ? 'error' : 'ok');
+            renderEntries();
+            await loadEntries();   // 順便讓公開頁的第一張照片跟著更新
         }
 
         // 從 Storage 公開網址取出物件路徑；外部貼上的網址回傳 null（不能亂刪）
@@ -851,7 +1043,7 @@
             // 順序很重要：先刪紀錄就查不到照片網址了，檔案會變孤兒。
             const { data: photos, error: pErr } = await supabase
                 .from('log_photos').select('photo_url').eq('log_id', id);
-            if (pErr) return say('formMsg', '查詢照片失敗：' + pErr.message);
+            if (pErr) return say('listMsg', '查詢照片失敗：' + pErr.message);
 
             const paths = (photos || []).map(p => storagePath(p.photo_url)).filter(Boolean);
             let fileNote = '';
@@ -871,8 +1063,9 @@
             }
 
             const { error } = await supabase.from('project_logs').delete().eq('id', id);
-            if (error) return say('formMsg', '刪除失敗：' + error.message);
-            say('formMsg', `已刪除紀錄${fileNote}。`, fileNote.includes('失敗') ? 'error' : 'ok');
+            if (error) return say('listMsg', '刪除失敗：' + error.message);
+            say('listMsg', `已刪除紀錄${fileNote}。`,
+                fileNote.includes('失敗') ? 'error' : 'ok');
             await loadEntries();
         }
 
