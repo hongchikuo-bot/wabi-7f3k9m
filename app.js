@@ -528,6 +528,19 @@ function bindStructureActions() {
     b.onclick = () => fn(b.getAttribute(attr));
   });
   on('[data-add-child]', 'data-add-child', startAddChild);
+  // 批次建立
+  on('[data-do-batch]', 'data-do-batch', doBatchCreate);
+  on('[data-cancel-batch]', 'data-cancel-batch', closeBatchForm);
+  on('[data-bt-all]', 'data-bt-all', () => {
+    document.querySelectorAll('.bt-node').forEach(c => { c.checked = true; });
+    updateBatchCount();
+  });
+  on('[data-bt-none]', 'data-bt-none', () => {
+    document.querySelectorAll('.bt-node').forEach(c => { c.checked = false; });
+    updateBatchCount();
+  });
+  document.querySelectorAll('.bt-node').forEach(c => { c.onchange = updateBatchCount; });
+  if ($('bt-titles')) $('bt-titles').oninput = updateBatchCount;
   on('[data-copy-node]', 'data-copy-node', startCopyNode);
   on('[data-do-copy]', 'data-do-copy', doCopyNode);
   on('[data-cancel-copy]', 'data-cancel-copy', cancelCopyNode);
@@ -667,7 +680,7 @@ function renderProjectItems() {
     ['partial_paid', '部分付款'], ['settled', '已結清']
   ];
 
-  box.innerHTML = currentItems.map(i => {
+  box.innerHTML = (batchOpen ? batchForm() : '') + currentItems.map(i => {
     if (editingItemId === i.id) return itemEditForm(i, nodeName, payOptions);
     const logCount = currentLogCounts[i.id] || 0;
 
@@ -964,6 +977,95 @@ function nodeWithDescendants(nodeId) {
   const walk = id => currentNodes.filter(n => n.parent_id === id).forEach(c => { out.push(c.id); walk(c.id); });
   walk(nodeId);
   return out;
+}
+
+// ===== 批次建立項目（多個地點 × 多個工項）=====
+// 使用者的樓層是重複的：同一個工項在每層都要建一次，逐筆點太慢。
+let batchOpen = false;
+
+// HTML 的 inline onclick 要用（函式宣告會提升，這裡先掛沒問題）
+window.openBatchForm = openBatchForm;
+
+function batchForm() {
+  const flat = flattenTree(buildNodeTree(currentNodes));
+  const boxes = flat.map(f => `
+    <label class="check-line batch-line">
+      <input type="checkbox" class="bt-node" value="${esc(f.node.id)}">
+      <span>${INDENT(f.depth)}${esc(f.node.name)}</span>
+    </label>`).join('');
+  return `
+  <div class="item-card editing" style="margin-bottom:16px">
+    <div class="item-head">
+      <strong>批次建立項目</strong>
+      <span class="row-actions">
+        <button class="btn-sm" data-do-batch="1">建立</button>
+        <button class="btn-sm btn-ghost" data-cancel-batch="1">取消</button>
+      </span>
+    </div>
+    <p class="hint">勾選地點（可多選），下面一行寫一個工項，交叉相乘全部建立。</p>
+    <div class="sub-label">地點
+      <button class="btn-sm btn-ghost" style="padding:2px 8px;font-size:11px" data-bt-all="1">全選</button>
+      <button class="btn-sm btn-ghost" style="padding:2px 8px;font-size:11px" data-bt-none="1">全不選</button>
+    </div>
+    <div class="batch-nodes">${boxes || '<div class="empty">還沒有地點，請先到 ① 建立。</div>'}</div>
+    <label class="ef" style="margin-top:12px"><span>工項（一行一個）</span>
+      <textarea id="bt-titles" rows="4"
+        placeholder="主牆手工塗漿&#10;地板海島型鋪設&#10;天花板紙漿燈槽"></textarea></label>
+    <p class="hint" id="bt-count">已選 0 個地點 × 0 個工項 ＝ 0 個項目</p>
+  </div>`;
+}
+
+function updateBatchCount() {
+  const el = $('bt-count');
+  if (!el) return;
+  const n = document.querySelectorAll('.bt-node:checked').length;
+  const t = parseTitles().length;
+  el.textContent = `已選 ${n} 個地點 × ${t} 個工項 ＝ ${n * t} 個項目`;
+}
+
+const parseTitles = () => ($('bt-titles')?.value || '')
+  .split('\n').map(s => s.trim()).filter(Boolean);
+
+export function openBatchForm() {
+  batchOpen = true;
+  renderProjectItems();
+  bindStructureActions();
+}
+
+export function closeBatchForm() {
+  batchOpen = false;
+  renderProjectItems();
+  bindStructureActions();
+}
+
+export async function doBatchCreate() {
+  if (!(await ensureCanManage())) return;
+  const nodeIds = [...document.querySelectorAll('.bt-node:checked')].map(c => c.value);
+  const titles = parseTitles();
+  if (!nodeIds.length) return showToast('請至少勾選一個地點', 'error');
+  if (!titles.length) return showToast('請至少寫一個工項（一行一個）', 'error');
+
+  // 交叉相乘：每個地點 × 每個工項
+  const rows = [];
+  nodeIds.forEach(nid => titles.forEach(t => rows.push({
+    project_id: currentProject.id,
+    node_id: nid,
+    title: t,
+    status: null
+  })));
+
+  const btn = document.querySelector('[data-do-batch]');
+  if (btn) { btn.disabled = true; btn.textContent = '建立中…'; }
+  try {
+    const { error } = await supabase.from('items').insert(rows);
+    if (error) throw error;
+    batchOpen = false;
+    showToast(`✅ 已建立 ${rows.length} 個項目（${nodeIds.length} 個地點 × ${titles.length} 個工項）。`, 'success');
+    await loadStructure();
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '建立'; }
+    showToast(err.message, 'error');
+  }
 }
 
 // ===== 複製結構（樓層重複時最省力）=====
