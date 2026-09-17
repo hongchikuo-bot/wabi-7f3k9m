@@ -686,6 +686,11 @@ function renderItemsByWorkType(box, nodeName, statusOptions, payOptions, prefix 
   });
   const sorted = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh-TW'));
 
+  if (!sorted.length) {
+    box.innerHTML = prefix + '<div class="empty">尚未建立項目。</div>';
+    return;
+  }
+
   box.innerHTML = prefix + sorted.map(([wt, list]) => {
     const est = totalOf(list, 'estimated_cost');
     const fin = totalOf(list, 'final_cost');
@@ -731,10 +736,9 @@ window.toggleItemView = toggleItemView;
 function renderProjectItems() {
   const box = $('itemsContainer');
   if (!box) return;
-  if (!currentItems.length) {
-    box.innerHTML = '<div class="empty">尚未建立項目。</div>';
-    return;
-  }
+  // ⚠️ 不要在「沒有項目」時就提前 return！
+  // 「批次建立」與「重複檢查」兩個面板必須在 0 筆項目時也顯示得到 ——
+  // 批次建立正是「還沒建任何項目」時要用的工具。
   const nodeName = id => {
     const n = currentNodes.find(x => x.id === id);
     if (!n) return '（節點已不存在）';
@@ -756,12 +760,19 @@ function renderProjectItems() {
 
   syncViewToggle();
   const dupHtml = dupOpen ? dupForm(nodeName) : '';
+  const batchHtml = batchOpen ? batchForm() : '';
+
   if (itemView === 'work') {
     renderItemsByWorkType(box, nodeName, statusOptions, payOptions, dupHtml);
     return;
   }
 
-  box.innerHTML = dupHtml + (batchOpen ? batchForm() : '') + currentItems.map(i => {
+  if (!currentItems.length) {
+    box.innerHTML = dupHtml + batchHtml + '<div class="empty">尚未建立項目。</div>';
+    return;
+  }
+
+  box.innerHTML = dupHtml + batchHtml + currentItems.map(i => {
     if (editingItemId === i.id) return itemEditForm(i, nodeName, payOptions);
     const logCount = currentLogCounts[i.id] || 0;
 
