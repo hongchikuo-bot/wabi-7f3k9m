@@ -260,6 +260,38 @@ export async function removeMember(projectId, userId) {
   return removeMemberRow(projectId, userId);
 }
 
+// ===== 地點樹（簡化後：不再需要使用者管理「階層」）=====
+
+// 取得（必要時建立）這個專案的「地點」階層。
+// 資料庫的 hierarchy_nodes.level_id 是 NOT NULL，所以底層還是需要一個階層列，
+// 但 UI 完全不提它 —— 使用者只看到一棵「地點」樹。
+// 名稱重複不再靠階層區分，而是靠 parent_id（路徑）。
+export async function ensureDefaultLevel(projectId) {
+  const { data, error } = await supabase
+    .from('hierarchy_levels')
+    .select('id')
+    .eq('project_id', projectId)
+    .order('level_index')
+    .limit(1);
+  if (error) throw error;
+  if (data && data.length) return data[0].id;
+
+  const { data: created, error: cErr } = await supabase
+    .from('hierarchy_levels')
+    .insert([{
+      project_id: projectId,
+      name: '地點',
+      singular_name: '地點',
+      plural_name: '地點',
+      level_index: 1,
+      sort_order: 1
+    }])
+    .select()
+    .single();
+  if (cErr) throw cErr;
+  return created.id;
+}
+
 // ===== 工程紀錄（後台「進度歷程」用）=====
 
 // 各項目各有幾筆紀錄（一次撈完，前端自己數，避免 N+1 查詢）

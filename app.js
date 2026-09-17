@@ -280,7 +280,7 @@ export async function loadStructure() {
   currentMembers = Array.isArray(members) ? members : [];
   currentMembersError = (members && members.__error) || null;
   currentLogCounts = (logCounts && !logCounts.__error) ? logCounts : {};
-  renderLevels();
+  // 註：不再渲染「階層」卡片 —— 簡化後使用者只看得到一棵地點樹
   renderNodes();
   renderProjectItems();
   fillStructureSelects();
@@ -527,9 +527,10 @@ function bindStructureActions() {
   const on = (sel, attr, fn) => document.querySelectorAll(sel).forEach(b => {
     b.onclick = () => fn(b.getAttribute(attr));
   });
-  on('[data-edit-level]', 'data-edit-level', editLevel);
-  on('[data-del-level]', 'data-del-level', deleteLevel);
-  on('[data-edit-node]', 'data-edit-node', editNode);
+  on('[data-add-child]', 'data-add-child', startAddChild);
+  on('[data-edit-node]', 'data-edit-node', startEditNode);
+  on('[data-save-node]', 'data-save-node', saveNode);
+  on('[data-cancel-node]', 'data-cancel-node', cancelEditNode);
   on('[data-del-node]', 'data-del-node', deleteNode);
   on('[data-edit-item]', 'data-edit-item', startEditItem);
   on('[data-save-item]', 'data-save-item', saveItem);
@@ -541,79 +542,83 @@ function bindStructureActions() {
   });
 }
 
-function renderLevels() {
-  const box = $('levelsContainer');
-  if (!box) return;
-  if (!currentLevels.length) {
-    box.innerHTML = '<div class="empty">尚未定義階層。</div>';
-    return;
-  }
-  box.innerHTML = currentLevels.map(l => {
-    // 這一層底下所有節點的項目，費用加總
-    const nodeIds = currentNodes.filter(n => n.level_id === l.id).map(n => n.id);
-    const items = currentItems.filter(i => nodeIds.includes(i.node_id));
-    const est = totalOf(items, 'estimated_cost');
-    const fin = totalOf(items, 'final_cost');
-    const costChip = items.length
-      ? `<span class="chip money">預估 ${money(est)}</span>`
-        + (fin ? `<span class="chip money">實際 ${money(fin)}</span>` : '')
-      : '';
-    return `
-    <div class="level-card">
-      <span class="chip">#${esc(l.level_index)}</span>
-      <strong>${esc(l.name)}</strong>
-      <span class="chip">${esc(l.singular_name)} / ${esc(l.plural_name)}</span>
-      ${costChip}
-      <span class="row-actions">
-        <button class="btn-sm btn-ghost" data-edit-level="${esc(l.id)}">編輯</button>
-        <button class="btn-sm btn-danger" data-del-level="${esc(l.id)}">刪除</button>
-      </span>
-    </div>`;
-  }).join('');
+// ===== 地點樹 =====
+// 簡化後的核心：不再管「階層」，所有地點都是同一棵樹，只看 parent_id。
+// 這樣愛分幾層就幾層，而且不會再有節點因為「爸爸在別的階層」而消失。
+function buildNodeTree(nodes) {
+  const childrenOf = new Map();
+  nodes.forEach(n => {
+    const k = n.parent_id || '';
+    if (!childrenOf.has(k)) childrenOf.set(k, []);
+    childrenOf.get(k).push(n);
+  });
+  const seen = new Set();
+  const walk = (node, depth) => {
+    if (seen.has(node.id)) return null;          // 資料異常時防無限迴圈
+    seen.add(node.id);
+    const kids = (childrenOf.get(node.id) || [])
+      .map(k => walk(k, depth + 1)).filter(Boolean);
+    return { node, depth, kids };
+  };
+  const tree = (childrenOf.get('') || []).map(n => walk(n, 0)).filter(Boolean);
+  // 孤兒（parent 指向已刪除的節點）也要列出來，絕不讓它消失
+  nodes.forEach(n => {
+    if (!seen.has(n.id)) {
+      const t = walk(n, 0);
+      if (t) tree.push({ ...t, orphan: true });
+    }
+  });
+  return tree;
 }
+
+// 攤平成「由上到下」的清單（下拉選單、縮排顯示都用它）
+function flattenTree(tree, out = []) {
+  tree.forEach(t => {
+    out.push({ node: t.node, depth: t.depth, orphan: t.orphan });
+    flattenTree(t.kids, out);
+  });
+  return out;
+}
+
+const INDENT = d => '　'.repeat(Math.min(d, 6));   // 最多縮 6 層，免得跑版
+
+// 正在行內編輯的地點 id（null = 沒有）
+let editingNodeId = null;
 
 function renderNodes() {
   const box = $('nodesContainer');
   if (!box) return;
-  if (!currentLevels.length) {
-    box.innerHTML = '<div class="empty">請先建立階層。</div>';
-    return;
-  }
   if (!currentNodes.length) {
-    box.innerHTML = '<div class="empty">尚未建立節點。</div>';
+    box.innerHTML = '<div class="empty">還沒有地點。從下面新增第一個（例如「1F」）。</div>';
     return;
   }
-  const html = currentLevels.map(level => {
-    const inLevel = currentNodes.filter(n => n.level_id === level.id);
-    if (!inLevel.length) return '';
-    // 樹狀渲染：parent_id 指向同階層的節點
-    const nodeHtml = n => {
-      const kids = inLevel.filter(c => c.parent_id === n.id);
-      const mine = currentItems.filter(i => i.node_id === n.id);
-      const count = mine.length;
-      const est = totalOf(mine, 'estimated_cost');
-      const fin = totalOf(mine, 'final_cost');
-      const cost = count
-        ? `<span class="chip money">${money(est)}${fin ? ' → ' + money(fin) : ''}</span>`
-        : '';
-      return `<li><strong>${esc(n.name)}</strong>`
-        + (n.description ? `<span class="chip">${esc(n.description)}</span>` : '')
-        + (count ? `<span class="chip">${count} 項目</span>` : '')
-        + cost
-        + `<span class="row-actions">`
-        + `<button class="btn-sm btn-ghost" data-edit-node="${esc(n.id)}">編輯</button>`
-        + `<button class="btn-sm btn-danger" data-del-node="${esc(n.id)}">刪除</button>`
-        + `</span>`
-        + (kids.length ? `<ul>${kids.map(nodeHtml).join('')}</ul>` : '')
-        + '</li>';
-    };
-    const roots = inLevel.filter(n => !n.parent_id);
-    return `<div class="node-card">
-      <span class="chip">#${esc(level.level_index)}</span><strong>${esc(level.name)}</strong>
-      <ul class="tree">${roots.map(nodeHtml).join('')}</ul>
-    </div>`;
-  }).join('');
-  box.innerHTML = html || '<div class="empty">節點尚未歸屬到任何階層。</div>';
+  const tree = buildNodeTree(currentNodes);
+
+  const nodeHtml = t => {
+    const n = t.node;
+    if (editingNodeId === n.id) return `<li>${nodeEditForm(n)}</li>`;
+    const mine = currentItems.filter(i => i.node_id === n.id);
+    const count = mine.length;
+    const est = totalOf(mine, 'estimated_cost');
+    const fin = totalOf(mine, 'final_cost');
+    const cost = count
+      ? `<span class="chip money">${money(est)}${fin ? ' → ' + money(fin) : ''}</span>`
+      : '';
+    return `<li><strong>${esc(n.name)}</strong>`
+      + (t.orphan ? '<span class="chip paused">上層已刪除</span>' : '')
+      + (n.description ? `<span class="chip">${esc(n.description)}</span>` : '')
+      + (count ? `<span class="chip">${count} 項目</span>` : '')
+      + cost
+      + `<span class="row-actions">`
+      + `<button class="btn-sm btn-ghost" data-add-child="${esc(n.id)}">＋ 子地點</button>`
+      + `<button class="btn-sm btn-ghost" data-edit-node="${esc(n.id)}">編輯</button>`
+      + `<button class="btn-sm btn-danger" data-del-node="${esc(n.id)}">刪除</button>`
+      + `</span>`
+      + (t.kids.length ? `<ul>${t.kids.map(nodeHtml).join('')}</ul>` : '')
+      + '</li>';
+  };
+
+  box.innerHTML = `<div class="node-card"><ul class="tree">${tree.map(nodeHtml).join('')}</ul></div>`;
 }
 
 function statusChip(status) {
@@ -771,21 +776,19 @@ export async function saveItem(itemId) {
 }
 
 function fillStructureSelects() {
-  const lv = $('newNodeLevel');
-  if (lv) {
-    lv.innerHTML = '<option value="">選擇階層…</option>' + currentLevels
-      .map(l => `<option value="${esc(l.id)}">#${esc(l.level_index)} ${esc(l.name)}</option>`).join('');
-  }
+  // 下拉全部改成「一棵樹 + 縮排」，不再按階層分組
+  const flat = flattenTree(buildNodeTree(currentNodes));
+  const opts = flat.map(f =>
+    `<option value="${esc(f.node.id)}">${INDENT(f.depth)}${esc(f.node.name)}`
+    + (f.orphan ? '（上層已刪除）' : '') + '</option>').join('');
+
+  // 新增地點的「上層」：留空＝頂層地點
   const pn = $('newNodeParent');
-  if (pn) {
-    pn.innerHTML = '<option value="">（無上層＝頂層節點）</option>' + currentNodes
-      .map(n => `<option value="${esc(n.id)}">${esc(n.name)}</option>`).join('');
-  }
+  if (pn) pn.innerHTML = '<option value="">無（＝頂層地點）</option>' + opts;
+
+  // 新增項目的「地點」
   const ino = $('newItemNode');
-  if (ino) {
-    ino.innerHTML = '<option value="">選擇節點…</option>' + currentNodes
-      .map(n => `<option value="${esc(n.id)}">${esc(n.name)}</option>`).join('');
-  }
+  if (ino) ino.innerHTML = '<option value="">選擇地點…</option>' + opts;
 }
 
 // ===== 建立：階層 =====
@@ -810,16 +813,16 @@ export async function createLevel() {
   }
 }
 
-// ===== 建立：節點 =====
+// ===== 建立：地點（簡化後不再需要選階層）=====
 export async function createNode() {
   if (!currentProject) return;
-  const levelId = $('newNodeLevel')?.value;
   const name = ($('newNodeName')?.value || '').trim();
   const desc = ($('newNodeDesc')?.value || '').trim();
   const parentId = $('newNodeParent')?.value || null;
-  if (!levelId) return showToast('請選擇所屬階層', 'error');
-  if (!name) return showToast('請輸入節點名稱', 'error');
+  if (!name) return showToast('請輸入地點名稱', 'error');
   try {
+    // 底層還是需要一個 level_id（欄位是 NOT NULL），但使用者看不到
+    const levelId = await project.ensureDefaultLevel(currentProject.id);
     await project.createNode({
       project_id: currentProject.id,
       level_id: levelId,
@@ -828,10 +831,30 @@ export async function createNode() {
       parent_id: parentId
     });
     ['newNodeName', 'newNodeDesc'].forEach(id => { if ($(id)) $(id).value = ''; });
-    showToast('節點已建立', 'success');
+    if ($('newNodeParent')) $('newNodeParent').value = '';
+    showToast('地點已新增', 'success');
     await loadStructure();
   } catch (err) {
-    showToast(err.message, 'error');
+    let extra = '';
+    if (err.code === '23505' || /duplicate key/i.test(err.message || '')) {
+      extra = '\n\n→ 資料庫還有「名稱不能重複」的限制，所以第二個「客廳」被擋下。\n'
+            + '請跑一次解除的 SQL（我訊息裡有），或先取不同的名字。';
+    }
+    showToast(err.message + extra, 'error');
+  }
+}
+
+// 「＋ 子地點」：把上層下拉預先選好，游標跳到名稱欄
+export function startAddChild(nodeId) {
+  const nd = currentNodes.find(n => n.id === nodeId);
+  const pn = $('newNodeParent');
+  if (pn) pn.value = nodeId;
+  const dayName = nd ? nd.name : '';
+  showToast(`在「${dayName}」底下新增——請填名稱再按「新增地點」`, 'success');
+  const el = $('newNodeName');
+  if (el) {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.focus();
   }
 }
 
@@ -936,21 +959,66 @@ function nodeWithDescendants(nodeId) {
   return out;
 }
 
-// ===== 編輯：節點 =====
-export async function editNode(nodeId) {
-  const nd = currentNodes.find(n => n.id === nodeId);
-  if (!nd || !(await ensureCanManage())) return;
-  const name = prompt('節點名稱（例：1F、客廳）', nd.name);
-  if (name === null) return;
-  if (!name.trim()) return showToast('名稱不能空白', 'error');
-  const desc = prompt('說明（可留空）', nd.description || '');
-  if (desc === null) return;
+// ===== 編輯：地點（行內表單，順便可以改「上層」＝搬家）=====
+// 原本用 prompt() 只能改名稱與說明，沒辦法調上層；改成行內表單後
+// 「舊資料重新掛到正確樓層底下」就做得到了。
+function nodeEditForm(n) {
+  const flat = flattenTree(buildNodeTree(currentNodes));
+  // 不能把上層設成自己或自己的子孫（會造成循環、整棵樹壞掉）
+  const banned = new Set([n.id]);
+  const markDesc = id => {
+    currentNodes.filter(x => x.parent_id === id).forEach(c => {
+      if (!banned.has(c.id)) { banned.add(c.id); markDesc(c.id); }
+    });
+  };
+  markDesc(n.id);
+  const opts = flat.filter(f => !banned.has(f.node.id))
+    .map(f => `<option value="${esc(f.node.id)}"${f.node.id === n.parent_id ? ' selected' : ''}>`
+            + `${INDENT(f.depth)}${esc(f.node.name)}</option>`).join('');
+  return `
+  <div class="item-card editing">
+    <div class="item-head">
+      <strong>編輯地點</strong>
+      <span class="row-actions">
+        <button class="btn-sm" data-save-node="${esc(n.id)}">儲存</button>
+        <button class="btn-sm btn-ghost" data-cancel-node="${esc(n.id)}">取消</button>
+      </span>
+    </div>
+    <div class="edit-grid">
+      <label class="ef"><span>名稱</span>
+        <input id="ne-name" value="${esc(n.name)}"></label>
+      <label class="ef"><span>上層地點（＝搬家）</span>
+        <select id="ne-parent"><option value="">無（＝頂層）</option>${opts}</select></label>
+      <label class="ef"><span>說明（選填）</span>
+        <input id="ne-desc" value="${esc(n.description || '')}"></label>
+    </div>
+  </div>`;
+}
+
+export function startEditNode(nodeId) {
+  editingNodeId = nodeId;
+  renderNodes();
+  bindStructureActions();
+}
+
+export function cancelEditNode() {
+  editingNodeId = null;
+  renderNodes();
+  bindStructureActions();
+}
+
+export async function saveNode(nodeId) {
+  if (!(await ensureCanManage())) return;
+  const name = ($('ne-name')?.value || '').trim();
+  if (!name) return showToast('名稱不能空白', 'error');
   try {
     await project.updateNodeRow(nodeId, {
-      name: name.trim(),
-      description: desc.trim() || null
+      name,
+      description: ($('ne-desc')?.value || '').trim() || null,
+      parent_id: $('ne-parent')?.value || null
     });
-    showToast('節點已更新', 'success');
+    editingNodeId = null;
+    showToast('地點已更新', 'success');
     await loadStructure();
   } catch (err) {
     showToast(err.message, 'error');
@@ -1084,9 +1152,10 @@ window.closeModal = closeModal;
 window.createLevel = createLevel;
 window.createNode = createNode;
 window.createProjectItem = createProjectItem;
-window.editLevel = editLevel;
-window.deleteLevel = deleteLevel;
-window.editNode = editNode;
+window.startAddChild = startAddChild;
+window.startEditNode = startEditNode;
+window.saveNode = saveNode;
+window.cancelEditNode = cancelEditNode;
 window.deleteNode = deleteNode;
 window.editItem = startEditItem;
 window.startEditItem = startEditItem;

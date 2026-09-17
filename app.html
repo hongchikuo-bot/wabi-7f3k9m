@@ -243,7 +243,7 @@
     .chip.first { background: #dcecd8; color: #3f6b34; }
     .chip.last { background: #ece0e0; color: #8b5454; }
     .toast-container { position: fixed; top: 20px; right: 20px; z-index: 1000; }
-    .toast { padding: 12px 20px; border-radius: 4px; margin-bottom: 8px; font-size: 14px; }
+    .toast { padding: 12px 20px; border-radius: 4px; margin-bottom: 8px; font-size: 14px; white-space: pre-wrap; max-width: 420px; }
     .toast.error { background: #e8d5d5; color: #8b2e2e; }
     .toast.success { background: #d5e8d5; color: #2e8b2e; }
   </style>
@@ -334,37 +334,27 @@
       <h2 id="projectTitle" class="project-title"></h2>
       <div id="costSummary"></div>
 
-      <!-- ① 階層定義 -->
+      <!-- ① 地點 -->
       <div class="card" style="margin-bottom:16px">
-        <h3><span class="step-num">①</span>階層定義</h3>
-        <p class="hint">定義這個專案的分層方式，例如「樓層」「區域」「工種」。序號決定顯示順序。</p>
-        <div id="levelsContainer"></div>
-        <div class="inline-form">
-          <input type="number" id="newLevelIndex" placeholder="序號" min="1" style="flex:0 0 90px">
-          <input type="text" id="newLevelName" placeholder="階層名稱（例：樓層）">
-          <input type="text" id="newLevelSingular" placeholder="單數（可留空）">
-          <input type="text" id="newLevelPlural" placeholder="複數（可留空）">
-          <button onclick="createLevel()">新增階層</button>
-        </div>
-      </div>
-
-      <!-- ② 節點 -->
-      <div class="card" style="margin-bottom:16px">
-        <h3><span class="step-num">②</span>節點</h3>
-        <p class="hint">掛在階層底下的實際節點，例如「1F」→「客廳」。上層留空＝頂層節點。</p>
+        <h3><span class="step-num">①</span>地點</h3>
+        <p class="hint">
+          像一棵樹：樓層 → 房間。想分幾層就幾層，不用事先定義。<br>
+          每個地點右邊有 <strong>＋ 子地點</strong>，點它下面的上層欄會自動填好。
+          同名的地點（例如每層都有「客廳」）沒問題，路徑會自動區分。
+        </p>
         <div id="nodesContainer"></div>
         <div class="inline-form">
-          <select id="newNodeLevel"></select>
-          <input type="text" id="newNodeName" placeholder="節點名稱（例：1F）">
-          <input type="text" id="newNodeDesc" placeholder="說明（選填）">
-          <select id="newNodeParent"></select>
-          <button onclick="createNode()">新增節點</button>
+          <input type="text" id="newNodeName" placeholder="地點名稱（例：1F、客廳）" style="flex:1 1 170px">
+          <select id="newNodeParent" style="flex:1 1 170px"></select>
+          <input type="text" id="newNodeDesc" placeholder="說明（選填）" style="flex:1 1 130px">
+          <button onclick="createNode()">新增地點</button>
         </div>
+        <p class="hint">上層留空＝頂層地點（例如「1F」）。</p>
       </div>
 
       <!-- ③ 項目 -->
       <div class="card">
-        <h3><span class="step-num">③</span>項目</h3>
+        <h3><span class="step-num">②</span>項目</h3>
         <p class="hint">掛在節點底下的具體工作，例如「客廳」→「主牆手工塗漿」。</p>
         <div id="itemsContainer"></div>
         <div class="inline-form">
@@ -385,7 +375,7 @@
 
       <!-- ④ 專案成員 -->
       <div class="card" style="margin-top:16px">
-        <h3><span class="step-num">④</span>專案成員</h3>
+        <h3><span class="step-num">③</span>專案成員</h3>
         <p class="hint">
           把帳號加入這個專案，並決定他能做什麼。<strong>沒被加入成員的人，即使帳號已批准登入，
           也不能新增紀錄或改施工狀態</strong>（只能看）。

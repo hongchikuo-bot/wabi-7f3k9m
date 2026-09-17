@@ -378,6 +378,28 @@
         let NODE_PATHS = new Map();   // node_id  → "1F / 客廳 / 主牆"
         let ITEMS_BY_ID = new Map();  // item_id  → { title, status, node_id }
 
+        // 把地點攤平成「由上到下」＋縮排深度（同一棵樹，跨階層，只看 parent_id）
+        function flatNodes(nodes) {
+            const childrenOf = new Map();
+            nodes.forEach(n => {
+                const k = n.parent_id || '';
+                if (!childrenOf.has(k)) childrenOf.set(k, []);
+                childrenOf.get(k).push(n);
+            });
+            const seen = new Set();
+            const out = [];
+            const walk = (n, depth) => {
+                if (seen.has(n.id)) return;
+                seen.add(n.id);
+                out.push({ node: n, depth });
+                (childrenOf.get(n.id) || []).forEach(k => walk(k, depth + 1));
+            };
+            (childrenOf.get('') || []).forEach(n => walk(n, 0));
+            // 孤兒（上層已被刪除）也要列出來，不能讓它消失
+            nodes.forEach(n => { if (!seen.has(n.id)) walk(n, 0); });
+            return out;
+        }
+
         const itemStatusLabel = s =>
             ({ completed: '（已完成）', in_progress: '（進行中）', paused: '（暫停）' }[s] || '');
 
@@ -429,21 +451,13 @@
                 return say('formMsg', '讀取專案結構失敗：' + err.message, 'error');
             }
 
-            // 地點下拉：依階層分組（optgroup）
+            // 地點下拉：一棵樹 + 縮排 + 完整路徑
+            // （同名地點（例如每層都有「客廳」）靠路徑區分，不會選錯）
             let html = nodes.length ? '<option value="">選擇地點…</option>'
-                                    : '<option value="">（此專案尚無節點，請先到後台建立）</option>';
-            for (const l of levels) {
-                const inLevel = nodes.filter(n => n.level_id === l.id);
-                if (!inLevel.length) continue;
-                html += `<optgroup label="${esc(l.name)}">` +
-                    inLevel.map(n => `<option value="${esc(n.id)}">${esc(NODE_PATHS.get(n.id))}</option>`).join('') +
-                    '</optgroup>';
-            }
-            // 萬一節點沒有對應的階層，還是要列出來，不能讓它消失
-            const orphan = nodes.filter(n => !levels.some(l => l.id === n.level_id));
-            if (orphan.length) {
-                html += orphan.map(n => `<option value="${esc(n.id)}">${esc(NODE_PATHS.get(n.id))}</option>`).join('');
-            }
+                                    : '<option value="">（此專案尚無地點，請先到後台建立）</option>';
+            html += flatNodes(nodes).map(({ node, depth }) =>
+                `<option value="${esc(node.id)}">${'　'.repeat(Math.min(depth, 6))}`
+                + `${esc(NODE_PATHS.get(node.id) || node.name)}</option>`).join('');
             $('node_id').innerHTML = html;
 
             // 項目下拉：依所屬節點分組，一眼看出每個項目在哪
