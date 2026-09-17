@@ -258,24 +258,28 @@ let currentNodes = [];
 let currentItems = [];
 let currentMembers = [];
 let currentMembersError = null;
+let currentLogCounts = {};   // item_id → 有幾筆工程紀錄（顯示在「進度歷程」按鈕上）
 
 export async function loadStructure() {
   if (!currentProject) return;
   const pid = currentProject.id;
-  const [levels, nodes, items, members] = await Promise.all([
+  const [levels, nodes, items, members, logCounts] = await Promise.all([
     project.getHierarchyLevels(pid),
     project.getNodesByProject(pid),
     project.getItems(pid),
     // 成員清單失敗（例如沒有讀取權限）不該讓整個結構頁掛掉，
     // 但也不能靜默變空 —— 把錯誤留下來顯示，否則會誤判成「還沒加入成員」
     project.getProjectMembersWithNames(pid)
-      .catch(err => { console.warn('成員載入失敗', err); return { __error: err.message }; })
+      .catch(err => { console.warn('成員載入失敗', err); return { __error: err.message }; }),
+    // 各項目的紀錄筆數：失敗只影響按鈕上的數字，不該擋住整個結構頁
+    project.getLogCountByItem(pid).catch(err => { console.warn('紀錄筆數載入失敗', err); return {}; })
   ]);
   currentLevels = levels || [];
   currentNodes = nodes || [];
   currentItems = items || [];
   currentMembers = Array.isArray(members) ? members : [];
   currentMembersError = (members && members.__error) || null;
+  currentLogCounts = (logCounts && !logCounts.__error) ? logCounts : {};
   renderLevels();
   renderNodes();
   renderProjectItems();
@@ -426,6 +430,98 @@ function renderCostSummary() {
     </div>`;
 }
 
+// ===== 進度歷程（單一項目的時間軸）=====
+// 「以項目為中心」的視角：把散落在不同日期的紀錄，依時間串成一條線，
+// 就不用在日曆裡翻找，一眼看到這個項目從起點到最新的完整過程。
+const STATUS_CLS = { completed: 'done', in_progress: 'doing', paused: 'paused' };
+
+export async function openItemTimeline(itemId) {
+  const item = currentItems.find(i => i.id === itemId);
+  $('timelineTitle').textContent = '進度歷程 — ' + (item ? item.title : '');
+  $('timelineBody').innerHTML = '<div class="empty">載入中…</div>';
+  $('timelineModal').classList.remove('hidden');
+  try {
+    const logs = await project.getItemLogs(itemId);
+    renderTimeline(item, logs);
+  } catch (err) {
+    $('timelineBody').innerHTML = '<div class="msg error">讀取失敗：' + esc(err.message) + '</div>';
+  }
+}
+
+export function closeTimeline() {
+  $('timelineModal')?.classList.add('hidden');
+}
+
+function renderTimeline(item, logs) {
+  const box = $('timelineBody');
+  const stLabel = { completed: '已完成', in_progress: '進行中', paused: '暫停' };
+
+  if (!logs.length) {
+    box.innerHTML = `<div class="empty">這個項目還沒有任何紀錄。<br><br>
+      到「工程紀錄」頁選這個項目上傳第一張照片，就會成為它的<strong>起點</strong>。</div>`;
+    return;
+  }
+
+  const photoCount = logs.reduce((n, l) => n + ((l.log_photos || []).length), 0);
+  const first = logs[0], last = logs[logs.length - 1];
+  const st = item ? (stLabel[item.status] || '未設定') : '—';
+  const span = first.log_date === last.log_date
+    ? esc(first.log_date)
+    : `${esc(first.log_date)} → ${esc(last.log_date)}`;
+
+  const summary = `<div class="tl-summary">
+      <span>目前狀態 <strong>${esc(st)}</strong></span>
+      <span>紀錄 <strong>${logs.length}</strong> 筆</span>
+      <span>照片 <strong>${photoCount}</strong> 張</span>
+      <span>期間 <strong>${span}</strong></span>
+    </div>`;
+
+  const body = logs.map((l, i) => {
+    const isFirst = i === 0;
+    const isLast = i === logs.length - 1;
+    const cls = 'tl-item' + (isFirst ? ' first' : '') + (isLast && !isFirst ? ' last' : '');
+    const badge = isFirst ? '<span class="chip first">起點</span>'
+      : (isLast ? '<span class="chip last">最新</span>' : '');
+    const t = l.log_time ? ' ' + String(l.log_time).slice(0, 5) : '';
+    const photos = (l.log_photos || []).slice()
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const photoHtml = photos.length
+      ? `<div class="tl-photos">${photos.map(p => `
+          <figure>
+            <img src="${esc(p.photo_url)}" alt="" onerror="this.style.visibility='hidden'">
+            ${p.photo_description ? `<figcaption>${esc(p.photo_description)}</figcaption>` : ''}
+          </figure>`).join('')}</div>`
+      : '';
+    const extra = [
+      l.issues_found ? `<div class="tl-extra"><b>發現問題：</b>${esc(l.issues_found)}</div>` : '',
+      l.resolution ? `<div class="tl-extra"><b>解決方案：</b>${esc(l.resolution)}</div>` : '',
+      l.notes ? `<div class="tl-extra"><b>備註：</b>${esc(l.notes)}</div>` : ''
+    ].join('');
+
+    return `
+    <div class="${cls}">
+      <div class="tl-head">
+        ${badge}
+        <span class="date">${esc(l.log_date)}</span>${esc(t)}
+        ${l.progress_status
+          ? `<span class="chip ${STATUS_CLS[l.progress_status] || ''}">${esc(stLabel[l.progress_status] || '')}</span>`
+          : ''}
+        ${l.location ? `<span class="chip">${esc(l.location)}</span>` : ''}
+        <span class="chip">${photos.length} 張</span>
+      </div>
+      ${l.main_description ? `<div class="tl-desc">${esc(l.main_description)}</div>` : ''}
+      ${extra}
+      ${photoHtml}
+    </div>`;
+  }).join('');
+
+  box.innerHTML = summary + `<div class="timeline">${body}</div>`;
+}
+
+// Modal 的 inline onclick 要用，必須掛到 window
+window.closeTimeline = closeTimeline;
+window.openItemTimeline = openItemTimeline;
+
 // 渲染完後綁定按鈕（每次重繪都要重綁）
 function bindStructureActions() {
   const on = (sel, attr, fn) => document.querySelectorAll(sel).forEach(b => {
@@ -439,6 +535,7 @@ function bindStructureActions() {
   on('[data-save-item]', 'data-save-item', saveItem);
   on('[data-cancel-item]', 'data-cancel-item', cancelEditItem);
   on('[data-del-item]', 'data-del-item', deleteItem);
+  on('[data-item-timeline]', 'data-item-timeline', openItemTimeline);
   document.querySelectorAll('[data-item-status]').forEach(s => {
     s.onchange = () => changeItemStatus(s.getAttribute('data-item-status'), s.value);
   });
@@ -560,6 +657,7 @@ function renderProjectItems() {
 
   box.innerHTML = currentItems.map(i => {
     if (editingItemId === i.id) return itemEditForm(i, nodeName, payOptions);
+    const logCount = currentLogCounts[i.id] || 0;
 
     const opts = statusOptions.map(([v, l]) =>
       `<option value="${v}"${(i.status || '') === v ? ' selected' : ''}>${l}</option>`).join('');
@@ -573,6 +671,7 @@ function renderProjectItems() {
       <div class="item-head">
         <strong>${esc(i.title)}</strong>
         <span class="row-actions">
+          <button class="btn-sm btn-ghost" data-item-timeline="${esc(i.id)}">進度歷程${logCount ? ` (${logCount})` : ''}</button>
           <button class="btn-sm btn-ghost" data-edit-item="${esc(i.id)}">編輯</button>
           <button class="btn-sm btn-danger" data-del-item="${esc(i.id)}">刪除</button>
         </span>

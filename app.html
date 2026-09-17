@@ -203,6 +203,45 @@
     }
     .modal h2 { margin-bottom: 20px; }
     .close-modal { float: right; background: transparent; border: none; font-size: 20px; cursor: pointer; color: #8a8070; }
+
+    /* 進度歷程（單一項目的時間軸） */
+    .modal.modal-wide { max-width: 900px; }
+    .tl-summary {
+      background: #3d352d; color: #f5f0e8; border-radius: 4px;
+      padding: 10px 14px; margin-bottom: 20px; font-size: 13px;
+      display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline;
+    }
+    .tl-summary strong { color: #bf8b2e; }
+    .timeline { position: relative; padding-left: 24px; }
+    .timeline::before {
+      content: ''; position: absolute; left: 6px; top: 8px; bottom: 8px;
+      width: 2px; background: #ddd5c8;
+    }
+    .tl-item { position: relative; padding-bottom: 22px; }
+    .tl-item:last-child { padding-bottom: 4px; }
+    .tl-item::before {
+      content: ''; position: absolute; left: -22px; top: 5px;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #bf8b2e; border: 2px solid #fffdf9;
+    }
+    .tl-item.first::before { background: #6b8e5c; }
+    .tl-item.last::before { background: #8b2e2e; }
+    .tl-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 14px; }
+    .tl-head .date { font-weight: 600; }
+    .tl-desc { font-size: 13.5px; margin-top: 5px; word-break: break-word; }
+    .tl-extra { font-size: 12.5px; color: #7a6a52; margin-top: 5px; word-break: break-word; }
+    .tl-extra b { color: #5a4d3f; }
+    .tl-photos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+    .tl-photos figure { margin: 0; width: 132px; }
+    .tl-photos img {
+      width: 100%; height: 96px; object-fit: cover; border-radius: 4px;
+      background: #eee; display: block; border: 1px solid #ece6dc;
+    }
+    .tl-photos figcaption {
+      font-size: 11px; color: #8a8070; margin-top: 3px; word-break: break-word;
+    }
+    .chip.first { background: #dcecd8; color: #3f6b34; }
+    .chip.last { background: #ece0e0; color: #8b5454; }
     .toast-container { position: fixed; top: 20px; right: 20px; z-index: 1000; }
     .toast { padding: 12px 20px; border-radius: 4px; margin-bottom: 8px; font-size: 14px; }
     .toast.error { background: #e8d5d5; color: #8b2e2e; }
@@ -377,6 +416,15 @@
       <button class="close-modal" onclick="closeModal()">×</button>
       <h2>審核申請</h2>
       <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <!-- 進度歷程 Modal（單一項目的完整時間軸） -->
+  <div id="timelineModal" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <button class="close-modal" onclick="closeTimeline()">×</button>
+      <h2 id="timelineTitle">進度歷程</h2>
+      <div id="timelineBody"></div>
     </div>
   </div>
 

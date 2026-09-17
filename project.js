@@ -260,6 +260,37 @@ export async function removeMember(projectId, userId) {
   return removeMemberRow(projectId, userId);
 }
 
+// ===== 工程紀錄（後台「進度歷程」用）=====
+
+// 各項目各有幾筆紀錄（一次撈完，前端自己數，避免 N+1 查詢）
+export async function getLogCountByItem(projectId) {
+  const { data, error } = await supabase
+    .from('project_logs')
+    .select('item_id')
+    .eq('project_id', projectId);
+  if (error) throw error;
+  const counts = {};
+  (data || []).forEach(r => {
+    if (r.item_id) counts[r.item_id] = (counts[r.item_id] || 0) + 1;
+  });
+  return counts;
+}
+
+// 某個項目的所有紀錄（由舊到新，含照片）——這就是「一個項目的完整生命週期」
+export async function getItemLogs(itemId) {
+  const { data, error } = await supabase
+    .from('project_logs')
+    .select('id, log_date, log_time, location, main_description, progress_status, '
+          + 'issues_found, resolution, notes, created_at, '
+          + 'log_photos(id, photo_url, photo_description, sort_order)')
+    .eq('item_id', itemId)
+    // 時間軸由舊到新：第一筆＝起點，最後一筆＝最新
+    .order('log_date', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
 // ===== 項目 CRUD =====
 
 // 取得專案內所有項目
