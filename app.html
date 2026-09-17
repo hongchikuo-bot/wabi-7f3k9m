@@ -157,6 +157,14 @@
       display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
       gap: 10px; margin-top: 12px;
     }
+    /* 批次建立：地點一多要限高捲動，否則整頁被拉長 */
+    .batch-nodes {
+      max-height: 220px; overflow-y: auto;
+      border: 1px solid #ece6dc; border-radius: 4px;
+      padding: 8px 10px; background: #fff; margin-top: 6px;
+    }
+    .batch-line { margin: 4px 0; }
+    .batch-line span { font-size: 13px; }
     .ef { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #8a8070; }
     .ef input, .ef select { font-size: 14px; padding: 6px 8px; }
     .ef-note { justify-content: flex-end; padding-top: 14px; color: #a8a29e; }
