@@ -528,6 +528,9 @@ function bindStructureActions() {
     b.onclick = () => fn(b.getAttribute(attr));
   });
   on('[data-add-child]', 'data-add-child', startAddChild);
+  on('[data-copy-node]', 'data-copy-node', startCopyNode);
+  on('[data-do-copy]', 'data-do-copy', doCopyNode);
+  on('[data-cancel-copy]', 'data-cancel-copy', cancelCopyNode);
   on('[data-edit-node]', 'data-edit-node', startEditNode);
   on('[data-save-node]', 'data-save-node', saveNode);
   on('[data-cancel-node]', 'data-cancel-node', cancelEditNode);
@@ -584,6 +587,8 @@ const INDENT = d => '　'.repeat(Math.min(d, 6));   // 最多縮 6 層，免得�
 
 // 正在行內編輯的地點 id（null = 沒有）
 let editingNodeId = null;
+// 正在「複製結構」的地點 id
+let copyingNodeId = null;
 
 function renderNodes() {
   const box = $('nodesContainer');
@@ -597,6 +602,7 @@ function renderNodes() {
   const nodeHtml = t => {
     const n = t.node;
     if (editingNodeId === n.id) return `<li>${nodeEditForm(n)}</li>`;
+    if (copyingNodeId === n.id) return `<li>${copyForm(n)}</li>`;
     const mine = currentItems.filter(i => i.node_id === n.id);
     const count = mine.length;
     const est = totalOf(mine, 'estimated_cost');
@@ -611,6 +617,7 @@ function renderNodes() {
       + cost
       + `<span class="row-actions">`
       + `<button class="btn-sm btn-ghost" data-add-child="${esc(n.id)}">＋ 子地點</button>`
+      + `<button class="btn-sm btn-ghost" data-copy-node="${esc(n.id)}">複製</button>`
       + `<button class="btn-sm btn-ghost" data-edit-node="${esc(n.id)}">編輯</button>`
       + `<button class="btn-sm btn-danger" data-del-node="${esc(n.id)}">刪除</button>`
       + `</span>`
@@ -957,6 +964,99 @@ function nodeWithDescendants(nodeId) {
   const walk = id => currentNodes.filter(n => n.parent_id === id).forEach(c => { out.push(c.id); walk(c.id); });
   walk(nodeId);
   return out;
+}
+
+// ===== 複製結構（樓層重複時最省力）=====
+function copyForm(n) {
+  const flat = flattenTree(buildNodeTree(currentNodes));
+  const ids = new Set(nodeWithDescendants(n.id));
+  // 不能複製到「自己或自己的子孫」底下（會變成奇怪的遞迴結構）
+  const opts = flat.filter(f => !ids.has(f.node.id))
+    .map(f => `<option value="${esc(f.node.id)}"${f.node.id === n.parent_id ? ' selected' : ''}>`
+            + `${INDENT(f.depth)}${esc(f.node.name)}</option>`).join('');
+  const sub = ids.size - 1;
+  const itemCount = currentItems.filter(i => ids.has(i.node_id)).length;
+  return `
+  <div class="item-card editing">
+    <div class="item-head">
+      <strong>複製「${esc(n.name)}」</strong>
+      <span class="row-actions">
+        <button class="btn-sm" data-do-copy="${esc(n.id)}">複製</button>
+        <button class="btn-sm btn-ghost" data-cancel-copy="${esc(n.id)}">取消</button>
+      </span>
+    </div>
+    <p class="hint">
+      會連同底下的 <strong>${sub}</strong> 個子地點一起複製
+      ${itemCount ? `，以及掛在上面的 <strong>${itemCount}</strong> 個項目` : ''}。
+    </p>
+    <div class="edit-grid">
+      <label class="ef"><span>新名稱</span>
+        <input id="cp-name" placeholder="例：2F"></label>
+      <label class="ef"><span>放在哪個上層底下</span>
+        <select id="cp-parent"><option value="">無（＝頂層）</option>${opts}</select></label>
+    </div>
+    ${itemCount ? `
+    <label class="check-line" style="margin-top:10px">
+      <input type="checkbox" id="cp-items">
+      <span>連項目一起複製（<strong>只複製名稱</strong>；狀態、費用、負責人會清空）</span>
+    </label>` : ''}
+  </div>`;
+}
+
+export function startCopyNode(nodeId) {
+  copyingNodeId = nodeId;
+  editingNodeId = null;
+  renderNodes();
+  bindStructureActions();
+}
+
+export function cancelCopyNode() {
+  copyingNodeId = null;
+  renderNodes();
+  bindStructureActions();
+}
+
+export async function doCopyNode(nodeId) {
+  if (!(await ensureCanManage())) return;
+  const src = currentNodes.find(n => n.id === nodeId);
+  if (!src) return;
+  const newName = ($('cp-name')?.value || '').trim();
+  if (!newName) return showToast('請輸入新名稱（例如 2F）', 'error');
+  const newParentId = $('cp-parent')?.value || null;
+  const withItems = !!$('cp-items')?.checked;
+
+  const btn = document.querySelector('[data-do-copy]');
+  if (btn) { btn.disabled = true; btn.textContent = '複製中…'; }
+  try {
+    const levelId = await project.ensureDefaultLevel(currentProject.id);
+    // 先把項目按地點分組，避免在複製函式裡重複查資料庫
+    const itemsByNode = {};
+    currentItems.forEach(i => {
+      if (i.node_id) (itemsByNode[i.node_id] = itemsByNode[i.node_id] || []).push(i);
+    });
+    const res = await project.duplicateNodeSubtree({
+      projectId: currentProject.id,
+      levelId,
+      rootNode: src,
+      allNodes: currentNodes,
+      itemsByNode,
+      newName,
+      newParentId,
+      withItems
+    });
+    copyingNodeId = null;
+    showToast(`✅ 已複製「${newName}」：${res.nodes} 個地點`
+      + (res.items ? `、${res.items} 個項目` : '') + '。', 'success');
+    await loadStructure();
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '複製'; }
+    let extra = '';
+    if (err.code === '23505' || /duplicate key/i.test(err.message || '')) {
+      extra = '\n\n→ 資料庫有「名稱不能重複」的限制，所以複製出來的同名子地點被擋。\n'
+            + '請跑一次解除的 SQL，或複製後手動改名字。';
+    }
+    showToast(err.message + extra, 'error');
+  }
 }
 
 // ===== 編輯：地點（行內表單，順便可以改「上層」＝搬家）=====

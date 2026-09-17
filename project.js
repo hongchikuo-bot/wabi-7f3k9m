@@ -292,6 +292,69 @@ export async function ensureDefaultLevel(projectId) {
   return created.id;
 }
 
+// ===== 複製地點子樹 =====
+// 使用者的樓層結構是重複的（每層都有客廳／臥室），所以需要「一鍵複製整層」。
+// 不依賴 crypto.randomUUID（非 secure context 會沒有），自己備一個。
+const uuid = () => (typeof crypto !== 'undefined' && crypto.randomUUID)
+  ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = (Math.random() * 16) | 0;
+      return (c === 'x' ? r : ((r & 0x3) | 0x8)).toString(16);
+    });
+
+// 回傳 { nodes, items }：複製了幾個地點、幾個項目
+export async function duplicateNodeSubtree({
+  projectId, levelId, rootNode, allNodes, itemsByNode,
+  newName, newParentId, withItems
+}) {
+  // 1. 收集子樹：深度優先，父一定排在子前面
+  const ordered = [];
+  const collect = n => {
+    ordered.push(n);
+    allNodes.filter(c => c.parent_id === n.id).forEach(collect);
+  };
+  collect(rootNode);
+
+  // 2. 先產生所有新 id，再組 rows —— 子節點才指得到「複製後的新父」
+  const idMap = new Map();
+  ordered.forEach(n => idMap.set(n.id, uuid()));
+
+  const nodeRows = ordered.map(n => ({
+    id: idMap.get(n.id),
+    project_id: projectId,
+    level_id: levelId,
+    name: n.id === rootNode.id ? newName : n.name,
+    description: n.description || null,
+    parent_id: n.id === rootNode.id
+      ? (newParentId || null)
+      : (idMap.get(n.parent_id) || null)
+  }));
+
+  const { error: nErr } = await supabase.from('hierarchy_nodes').insert(nodeRows);
+  if (nErr) throw nErr;
+
+  // 3. 選擇性複製項目：只複製名稱，狀態／費用／負責人一律清空
+  //    （每層的面積與進度都不一樣，複製費用會是錯的）
+  let itemCount = 0;
+  if (withItems) {
+    const itemRows = [];
+    ordered.forEach(n => {
+      (itemsByNode[n.id] || []).forEach(it => itemRows.push({
+        project_id: projectId,
+        node_id: idMap.get(n.id),
+        title: it.title,
+        status: null
+      }));
+    });
+    if (itemRows.length) {
+      const { error: iErr } = await supabase.from('items').insert(itemRows);
+      if (iErr) throw new Error(`地點已複製，但項目複製失敗：${iErr.message}`);
+      itemCount = itemRows.length;
+    }
+  }
+  return { nodes: nodeRows.length, items: itemCount };
+}
+
 // ===== 工程紀錄（後台「進度歷程」用）=====
 
 // 各項目各有幾筆紀錄（一次撈完，前端自己數，避免 N+1 查詢）
