@@ -372,12 +372,14 @@
       <div class="card">
         <h3><span class="step-num">②</span>項目</h3>
         <p class="hint">掛在節點底下的具體工作，例如「客廳」→「主牆手工塗漿」。</p>
-        <div id="itemsContainer"></div>
-        <div class="inline-form" style="margin-top:12px">
-          <button class="btn-sm btn-ghost" id="batchOpenBtn" onclick="openBatchForm()">＋ 批次建立（多個地點 × 多個工項）</button>
+        <!-- ⚠️ 這排要放在 itemsContainer「上面」——
+             放在下面的話，項目一多就被推到很底下，會找不到 -->
+        <div class="inline-form" style="margin-bottom:14px">
+          <button class="btn-sm btn-ghost" id="batchOpenBtn" onclick="openBatchForm()">＋ 批次建立</button>
           <button class="btn-sm btn-ghost" id="viewToggleBtn" onclick="toggleItemView()">依工項彙總</button>
           <button class="btn-sm btn-ghost" onclick="openDupCheck()">檢查重複</button>
         </div>
+        <div id="itemsContainer"></div>
         <div class="inline-form">
           <select id="newItemNode"></select>
           <select id="newItemWorkTypePick" style="flex:1 1 150px"></select>
