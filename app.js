@@ -554,6 +554,8 @@ function bindStructureActions() {
   on('[data-del-item]', 'data-del-item', deleteItem);
   if ($('newItemWorkTypePick')) $('newItemWorkTypePick').onchange = pickWorkType;
   if ($('newItemTitlePick')) $('newItemTitlePick').onchange = pickItemTitle;
+  on('[data-close-dup]', 'data-close-dup', closeDupCheck);
+  on('[data-keep-first]', 'data-keep-first', keepFirstOfDup);
   on('[data-item-timeline]', 'data-item-timeline', openItemTimeline);
   document.querySelectorAll('[data-item-status]').forEach(s => {
     s.onchange = () => changeItemStatus(s.getAttribute('data-item-status'), s.value);
@@ -675,7 +677,7 @@ export function toggleItemView() {
 // 工項名稱：沒填 work_type 就退回用「項目名稱」——所以不填也能彙總
 const workTypeOf = i => String(i.work_type || i.title || '（未命名）').trim();
 
-function renderItemsByWorkType(box, nodeName, statusOptions, payOptions) {
+function renderItemsByWorkType(box, nodeName, statusOptions, payOptions, prefix = '') {
   const groups = new Map();
   currentItems.forEach(i => {
     const k = workTypeOf(i);
@@ -684,7 +686,7 @@ function renderItemsByWorkType(box, nodeName, statusOptions, payOptions) {
   });
   const sorted = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh-TW'));
 
-  box.innerHTML = sorted.map(([wt, list]) => {
+  box.innerHTML = prefix + sorted.map(([wt, list]) => {
     const est = totalOf(list, 'estimated_cost');
     const fin = totalOf(list, 'final_cost');
     const done = list.filter(i => i.status === 'completed').length;
@@ -753,12 +755,13 @@ function renderProjectItems() {
   ];
 
   syncViewToggle();
+  const dupHtml = dupOpen ? dupForm(nodeName) : '';
   if (itemView === 'work') {
-    renderItemsByWorkType(box, nodeName, statusOptions, payOptions);
+    renderItemsByWorkType(box, nodeName, statusOptions, payOptions, dupHtml);
     return;
   }
 
-  box.innerHTML = (batchOpen ? batchForm() : '') + currentItems.map(i => {
+  box.innerHTML = dupHtml + (batchOpen ? batchForm() : '') + currentItems.map(i => {
     if (editingItemId === i.id) return itemEditForm(i, nodeName, payOptions);
     const logCount = currentLogCounts[i.id] || 0;
 
@@ -977,6 +980,116 @@ export function startAddChild(nodeId) {
     el.focus();
   }
 }
+
+// ===== 重複項目檢查 =====
+// 重複的來源：同一個地點的同一件事被建了兩次（通常是手打名稱造成的）。
+// 判斷方式：同一個 node_id ＋ 同樣的工項（沒填工項就用項目名稱）。
+let dupOpen = false;
+
+function findDuplicates() {
+  const groups = new Map();
+  currentItems.forEach(i => {
+    if (!i.node_id) return;                       // 沒有地點的無法比對
+    const k = i.node_id + '||' + workTypeOf(i);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(i);
+  });
+  return [...groups.values()].filter(list => list.length > 1);
+}
+
+function dupForm(nodeName) {
+  const dups = findDuplicates();
+  const closeBtn = `<button class="btn-sm btn-ghost" data-close-dup="1">關閉</button>`;
+
+  if (!dups.length) {
+    return `<div class="item-card" style="border-left:3px solid #6b8e5c;margin-bottom:16px">
+      <div class="item-head"><strong>重複檢查</strong>
+        <span class="row-actions">${closeBtn}</span></div>
+      <p class="hint">✅ 沒有發現重複 —— 每個「地點 ＋ 工項」的組合都只有一筆。</p>
+    </div>`;
+  }
+
+  const total = dups.reduce((n, l) => n + l.length - 1, 0);
+  const statusLabels = { completed: '已完成', in_progress: '進行中', paused: '暫停' };
+
+  const blocks = dups.map((list, gi) => {
+    const wt = workTypeOf(list[0]);
+    const rows = list.map((i, idx) => `
+      <div class="wt-row">
+        <span class="wt-loc">
+          <span class="chip ${idx === 0 ? 'done' : 'paused'}">${idx === 0 ? '保留' : '多餘'}</span>
+          ${esc(i.title)}
+          ${i.estimated_cost !== null && i.estimated_cost !== undefined ? `　預估 ${money(i.estimated_cost)}` : ''}
+          ${i.status ? `　${esc(statusLabels[i.status] || '')}` : ''}
+          ${currentLogCounts[i.id] ? `　紀錄 ${currentLogCounts[i.id]} 筆` : ''}
+        </span>
+        <span class="row-actions">
+          <button class="btn-sm btn-ghost" data-item-timeline="${esc(i.id)}">歷程</button>
+          <button class="btn-sm btn-danger" data-del-item="${esc(i.id)}">刪除</button>
+        </span>
+      </div>`).join('');
+    return `
+    <div class="item-card wt-group" style="margin-bottom:10px">
+      <div class="item-head">
+        <strong>${esc(wt)}</strong>
+        <span class="row-actions">
+          <span class="chip">${esc(nodeName(list[0].node_id))}</span>
+          <span class="chip paused">${list.length} 筆</span>
+          <button class="btn-sm btn-ghost" data-keep-first="${gi}">只留第一筆</button>
+        </span>
+      </div>
+      ${rows}
+    </div>`;
+  }).join('');
+
+  return `<div style="margin-bottom:16px">
+    <div class="item-card" style="border-left:3px solid #8b2e2e;margin-bottom:10px">
+      <div class="item-head">
+        <strong>重複檢查</strong>
+        <span class="row-actions">
+          <span class="chip paused">發現 ${dups.length} 組、多出 ${total} 筆</span>
+          ${closeBtn}
+        </span>
+      </div>
+      <p class="hint">
+        判斷方式：<strong>同一個地點 ＋ 同樣的工項</strong>出現一次以上。<br>
+        如果不是真的重複（例如同一面牆刻意分兩次施工），直接按「關閉」忽略就好。
+      </p>
+    </div>
+    ${blocks}
+  </div>`;
+}
+
+export function openDupCheck() {
+  dupOpen = true;
+  renderProjectItems();
+  bindStructureActions();
+}
+
+export function closeDupCheck() {
+  dupOpen = false;
+  renderProjectItems();
+  bindStructureActions();
+}
+
+// 某組只留第一筆，其餘刪掉
+export async function keepFirstOfDup(gi) {
+  const list = findDuplicates()[Number(gi)];
+  if (!list || list.length < 2) return;
+  if (!(await ensureCanManage())) return;
+  const extra = list.slice(1);
+  const wt = workTypeOf(list[0]);
+  if (!confirm(`「${wt}」共 ${list.length} 筆，只保留第一筆，其餘 ${extra.length} 筆會刪除。\n\n無法復原。確定嗎？`)) return;
+  try {
+    await project.deleteItemRows(extra.map(i => i.id));
+    showToast(`已刪除 ${extra.length} 筆重複項目`, 'success');
+    await loadStructure();
+  } catch (err) {
+    showToast('刪除失敗：' + err.message, 'error');
+  }
+}
+
+window.openDupCheck = openDupCheck;
 
 // ===== 「從用過的挑」下拉 =====
 // 下拉只是方便挑選；真正的來源是文字欄（只有選「＋ 新的…」時才把它顯示出來打字）
