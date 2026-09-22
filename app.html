@@ -382,12 +382,12 @@
         <div id="itemsContainer"></div>
         <div class="inline-form">
           <select id="newItemNode"></select>
-          <select id="newItemWorkTypePick" style="flex:1 1 150px"></select>
-          <input type="text" id="newItemWorkType" class="hidden"
-                 placeholder="輸入新工項" style="flex:1 1 150px">
-          <select id="newItemTitlePick" style="flex:1 1 170px"></select>
-          <input type="text" id="newItemTitle" class="hidden"
-                 placeholder="輸入新名稱" style="flex:1 1 170px">
+          <select id="newItemWorkTypePick" style="flex:0 1 170px"></select>
+          <input type="text" id="newItemWorkType"
+                 placeholder="工項（可留空）" style="flex:1 1 150px">
+          <select id="newItemTitlePick" style="flex:0 1 170px"></select>
+          <input type="text" id="newItemTitle"
+                 placeholder="項目名稱（必填）" style="flex:1 1 170px">
           <input type="text" id="newItemAssignee" placeholder="負責人（選填）">
           <input type="number" id="newItemEst" placeholder="預估費用" min="0" step="1" style="flex:0 0 120px">
           <select id="newItemStatus">
@@ -399,9 +399,9 @@
           <button onclick="createProjectItem()">新增項目</button>
         </div>
         <p class="hint">
-          <strong>工項</strong>與<strong>名稱</strong>都可以從「<strong>用過的</strong>」下拉挑選 ——
-          同名的工作在每一層都要建一次時，挑選就不會打錯字、也不會變成兩筆重複的。
-          要全新的就選「＋ 新的…」直接打字。工項留空＝用名稱當工項。
+          <strong>名稱</strong>直接打。上面兩個下拉是「<strong>用過的</strong>」清單 ——
+          同名的工作在每一層都要建一次時，用挑的就不會打錯字、也不會變成兩筆重複的。<br>
+          工項可以留空（留空就用名稱當工項）。
         </p>
       </div>
 

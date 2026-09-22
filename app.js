@@ -909,20 +909,20 @@ function fillStructureSelects() {
   const uniqSorted = arr => [...new Set(arr.filter(v => v !== null && v !== undefined && String(v).trim()))]
     .map(v => String(v).trim())
     .sort((a, b) => a.localeCompare(b, 'zh-TW'));
-  const fillPick = (elId, list, emptyLabel, newLabel) => {
+  const fillPick = (elId, list, emptyLabel) => {
     const el = $(elId);
     if (!el) return;
     const prev = el.value;
+    // ⚠️ 不要做「＋ 新的…」這種選項 —— 文字欄預設就是可見的，
+    // 選「自己輸入」只是把焦點放回文字欄而已。少一個選項少一個困惑。
     el.innerHTML = `<option value="">${emptyLabel}</option>`
-      + list.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')
-      + `<option value="__new">${newLabel}</option>`;
-    // 盡量保留原本選的（重繪後不要跳掉）
+      + list.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
     if (prev && [...el.options].some(o => o.value === prev)) el.value = prev;
   };
   fillPick('newItemWorkTypePick', uniqSorted(currentItems.map(i => i.work_type)),
-           '工項：從用過的挑', '＋ 新的工項…');
+           '工項：✏️ 自己輸入');
   fillPick('newItemTitlePick', uniqSorted(currentItems.map(i => i.title)),
-           '名稱：從用過的挑', '＋ 新的名稱…');
+           '名稱：✏️ 自己輸入');
 }
 
 // ===== 建立：階層 =====
@@ -1108,13 +1108,14 @@ function applyPick(selId, inputId) {
   const sel = $(selId), inp = $(inputId);
   if (!sel || !inp) return;
   const v = sel.value;
-  if (v === '__new') {
-    inp.value = '';
+  if (v && v !== '__new') {
+    // 從清單挑的 → 填進文字欄並收起來（避免兩處不一致）
+    inp.value = v;
+    inp.classList.add('hidden');
+  } else {
+    // 「自己輸入」→ 把文字欄打開、游標放進去（不清空，讓你可以從原值改）
     inp.classList.remove('hidden');
     inp.focus();
-  } else {
-    inp.value = v;                 // '' = 未設定
-    inp.classList.add('hidden');
   }
 }
 
@@ -1144,7 +1145,8 @@ export async function createProjectItem() {
     ['newItemTitle', 'newItemAssignee', 'newItemEst']
       .forEach(id => { if ($(id)) $(id).value = ''; });
     if ($('newItemTitlePick')) $('newItemTitlePick').value = '';
-    if ($('newItemTitle')) $('newItemTitle').classList.add('hidden');
+    // 名稱欄是主要輸入方式，保持可見，只清空
+    if ($('newItemTitle')) $('newItemTitle').classList.remove('hidden');
     showToast('項目已建立', 'success');
     await loadStructure();
   } catch (err) {
