@@ -211,8 +211,23 @@
         .rec-by { font-size: 0.75rem; }
         .rec-desc { font-size: 0.92rem; margin-bottom: 0.4rem; white-space: pre-wrap; }
         .rec-todo { font-size: 0.82rem; color: var(--color-accent); opacity: 0.85; margin-bottom: 0.4rem; white-space: pre-wrap; }
-        .rec-thumb { max-width: 100%; border-radius: 4px; margin: 0.3rem 0; display: block; }
+        .rec-thumb {
+            max-height: 140px; max-width: 100%; width: auto; border-radius: 4px;
+            display: block; margin: 0.3rem 0 0.15rem;
+        }
+        .rec-thumb-link { display: inline-block; cursor: zoom-in; }
+        .rec-shot-count { font-size: 0.72rem; color: var(--color-muted); margin-bottom: 0.4rem; }
         .rec-actions { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
+        /* 待辦：完成日期＋新增列 */
+        .todo-date {
+            width: auto; font-size: 0.72rem; padding: 0.05rem 0.2rem;
+            border: 1px solid var(--color-line); border-radius: 4px; color: var(--color-muted);
+        }
+        .todo-row.pending .todo-text { color: var(--color-accent); }
+        .todo-add { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
+        .todo-add input { flex: 1 1 auto; }
+        .todo-add button { flex: 0 0 auto; width: auto; }
+        .photo-btns { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
 
         /* 窄螢幕：四欄只有 ~105px，縮小字級、摘要換短版 */
         @media (max-width: 700px) {
@@ -394,12 +409,22 @@
                 <textarea id="issues_found" rows="2"></textarea>
             </div>
 
-            <div class="form-group">
-                <label>待辦事項 / 下一步</label>
-                <textarea id="resolution" rows="3"
-                    placeholder="一行一項，例：&#10;塗底漆&#10;塗彈泥&#10;塗面漆"></textarea>
-                <div class="hint">開案時寫這裡＝這個案子要做的事；未完成的紀錄會把它顯示在列表上。</div>
+            <!-- 待辦事項：直接勾選 + 新增（掛在工項上，跨紀錄延續）-->
+            <div class="form-group" id="formTodosWrap" style="display:none">
+                <label>待辦事項</label>
+                <div id="formTodos"></div>
+                <div class="todo-add">
+                    <input type="text" id="newTodoText" placeholder="要新增的待辦，例：塗底漆">
+                    <button type="button" class="ghost small" id="addTodoBtn">＋ 新增</button>
+                </div>
+                <div class="hint">
+                    勾起來＝做完（自動記今天，日期可以點開改）。這裡新增的，送出後會掛在這個工項上，
+                    下次進來就是可勾的清單。
+                </div>
             </div>
+            <!-- 緩衝欄位：把「這次新增的待辦」寫進紀錄的 resolution（歷史留痕、公開頁明細看得到）。
+                 畫面上不用看到它，使用者只在上面那個輸入框打字。 -->
+            <textarea id="resolution" class="hidden"></textarea>
 
             <div class="form-group">
                 <label>備註</label>
@@ -408,21 +433,21 @@
 
             <div class="form-group">
                 <label>照片</label>
+                <div class="photo-btns">
+                    <button type="button" id="cameraBtn">📷 拍照（可連續）</button>
+                    <input type="file" id="cameraFiles" accept="image/*" capture="environment" class="hidden">
+                </div>
                 <div id="dropZone" class="drop-zone">
-                    <span class="big">📷 拍照 / 選擇照片</span>
-                    <span class="sub">點這裡選檔或開相機，也可以把圖片拖進來（可多張）</span>
+                    <span class="big">🖼 從相簿選（可多選）</span>
+                    <span class="sub">點這裡選檔，電腦上也可以把圖片拖進來</span>
                     <input type="file" id="photoFiles" accept="image/*" multiple class="hidden">
                 </div>
                 <div id="photoPreview"></div>
                 <div id="uploadProgress" class="progress"></div>
             </div>
 
-            <div class="form-group">
-                <label>或直接貼圖片網址</label>
-                <div id="photos"></div>
-                <button type="button" class="ghost small" id="addPhotoBtn">＋ 新增一張網址</button>
-                <div class="hint">第一張照片會顯示在公開時間軸的卡片上。</div>
-            </div>
+            <!-- 貼網址的功能已移除（大家都直接傳照片）；保留容器給程式相容 -->
+            <div id="photos" class="hidden"></div>
 
             <button id="submitBtn">新增紀錄</button>
             </div><!-- /formWrap -->
@@ -727,6 +752,7 @@
             CURRENT_ITEM_ID = found ? found.id : null;
             syncCompleteCheckbox();
             await loadLatestLogForItem(CURRENT_ITEM_ID, wt, nodeId);
+            refreshFormTodos();     // 待辦清單跟著換工項
         }
 
         // 找或建立 (地點 × 工項) 的進度卡，回傳 items 那一列
@@ -1246,10 +1272,12 @@
                 if ($(id)) $(id).value = '';
             });
             if ($('workTypePick')) $('workTypePick').value = '';
+            if ($('resolution')) $('resolution').value = '';     // 清掉「這次新增的待辦」緩衝
+            if ($('newTodoText')) $('newTodoText').value = '';
+            refreshFormTodos();
             if ($('mark_complete')) $('mark_complete').checked = false;
             syncCompleteCheckbox();
             $('photos').innerHTML = '';
-            addPhotoRow();
             pendingFiles = [];
             renderFilePreviews();
             $('uploadProgress').textContent = '';
@@ -1295,6 +1323,7 @@
             }
             if (before) { before.done = !!done; before.done_at = done ? new Date().toISOString() : null; }
             renderEntries();
+            refreshFormTodos();
         }
 
         async function addTodo(itemId) {
@@ -1306,6 +1335,7 @@
             if (error) return say('listMsg', '待辦新增失敗：' + error.message, 'error');
             if (data) TODOS.push(data);
             renderEntries();
+            refreshFormTodos();
         }
 
         async function deleteTodo(id) {
@@ -1314,6 +1344,7 @@
             if (error) return say('listMsg', '待辦刪除失敗：' + error.message, 'error');
             TODOS = TODOS.filter(t => t.id !== id);
             renderEntries();
+            refreshFormTodos();
         }
 
         async function loadEntries() {
@@ -1454,8 +1485,12 @@
                 ${e.main_description ? `<div class="rec-desc">${esc(e.main_description)}</div>` : ''}
                 ${(showTodo && todos.length) ? `<div class="rec-todo">待辦：${esc(todos.join('、'))}</div>` : ''}
                 ${photo.photo_url
-                    ? `<img class="rec-thumb" src="${esc(photo.photo_url)}" alt="" onerror="this.style.visibility='hidden'">`
+                    ? `<a href="${esc(photo.photo_url)}" target="_blank" rel="noopener" class="rec-thumb-link"
+                          title="點一下看大圖"><img class="rec-thumb" src="${esc(photo.photo_url)}" alt=""
+                          loading="lazy" onerror="this.style.visibility='hidden'"></a>`
                     : ''}
+                ${(e.log_photos && e.log_photos.length > 1)
+                    ? `<div class="rec-shot-count">共 ${e.log_photos.length} 張照片</div>` : ''}
                 ${editingEntryId === e.id ? renderEditForm(e) : ''}
                 <div class="rec-actions">
                     <button class="ghost small" data-edit="${esc(e.id)}">編輯</button>
@@ -1464,24 +1499,123 @@
             </div>`;
         }
 
-        // 待辦清單（工項層級）：未完成的在上面，已經勾掉的留著但淡化
-        function todoBlock(it) {
-            if (!HAS_TODOS || it.status === '_loose') return '';
-            const list = todosOf(it.itemId);
-            const open = list.filter(t => !t.done);
-            const done = list.filter(t => t.done);
-            const row = t => `<div class="todo-row${t.done ? ' done' : ''}">
+        // 待辦清單（工項層級）：未完成的在上面；勾掉可改完成日期；已完成的留著但淡化
+        function todoRowHtml(t) {
+            const dateVal = t.done_at ? String(t.done_at).slice(0, 10) : '';
+            return `<div class="todo-row${t.done ? ' done' : ''}">
                 <input type="checkbox" data-todo="${esc(t.id)}"${t.done ? ' checked' : ''}>
                 <span class="todo-text">${esc(t.text)}</span>
+                ${t.done
+                    ? `<input type="date" class="todo-date" data-todo-date="${esc(t.id)}" value="${esc(dateVal)}"
+                              title="完成日期（可以改）">`
+                    : ''}
                 <button type="button" class="todo-x" data-del-todo="${esc(t.id)}" title="刪除這項待辦">✕</button>
             </div>`;
+        }
+
+        function todoListHtml(itemId) {
+            const list = todosOf(itemId);
+            const open = list.filter(t => !t.done);
+            const done = list.filter(t => t.done);
+            return (open.length ? open.map(todoRowHtml).join('')
+                    : (done.length ? '' : '<div class="hint">目前沒有待辦。</div>'))
+                + (done.length
+                    ? `<div class="todos-done-head">已完成 ${done.length} 項</div>` + done.map(todoRowHtml).join('')
+                    : '');
+        }
+
+        function todoBlock(it) {
+            if (!HAS_TODOS || it.status === '_loose') return '';
             return `<div class="todos">
                 <div class="todos-head">待辦事項</div>
-                ${open.length ? open.map(row).join('')
-                    : (done.length ? '' : '<div class="hint">目前沒有待辦。</div>')}
-                ${done.length ? `<div class="todos-done-head">已完成 ${done.length} 項</div>` + done.map(row).join('') : ''}
+                ${todoListHtml(it.itemId)}
                 <button type="button" class="ghost small" data-add-todo="${esc(it.itemId)}">＋ 新增待辦</button>
             </div>`;
+        }
+
+        // 新增紀錄表單裡的待辦區塊：同一份清單（勾選立即寫入）＋ 這次要新增的（送出才寫）
+        function refreshFormTodos() {
+            const wrap = $('formTodosWrap');
+            if (!wrap) return;
+            const hasWT = !!($('work_type') && $('work_type').value.trim());
+            wrap.style.display = hasWT ? 'block' : 'none';
+            if (!hasWT) return;
+            const box = $('formTodos');
+            if (!box) return;
+            if (!HAS_TODOS) {
+                box.innerHTML = '<div class="hint">待辦清單還沒啟用（要跑 sql/add-item-todos.sql）。</div>';
+                return;
+            }
+            const pending = todoLines($('resolution') ? $('resolution').value : '');
+            box.innerHTML = `<div class="todos">
+                <div class="todos-head">${CURRENT_ITEM_ID ? '這個工項目前的待辦' : '這個工項還沒建立（送出時一起建立）'}</div>
+                ${CURRENT_ITEM_ID ? todoListHtml(CURRENT_ITEM_ID) : ''}
+                ${pending.length
+                    ? `<div class="todos-done-head">這次要新增 ${pending.length} 項</div>`
+                      + pending.map((x, i) => `<div class="todo-row pending">
+                            <span class="todo-text">${esc(x)}</span>
+                            <button type="button" class="todo-x" data-del-pending="${i}" title="移除">✕</button>
+                        </div>`).join('')
+                    : ''}
+            </div>`;
+            if ($('addTodoBtn')) $('addTodoBtn').onclick = addPendingTodo;
+            if ($('newTodoText')) {
+                $('newTodoText').onkeydown = e => {
+                    if (e.key === 'Enter') { e.preventDefault(); addPendingTodo(); }
+                };
+            }
+            bindTodoRows(box);
+        }
+
+        // 表單裡「＋新增」先放進緩衝（#resolution），送出時才真的寫進資料庫
+        function addPendingTodo() {
+            const inp = $('newTodoText');
+            const text = String(inp ? inp.value : '').trim();
+            if (!text) return;
+            const cur = todoLines($('resolution') ? $('resolution').value : '');
+            if (!cur.includes(text)) cur.push(text);
+            $('resolution').value = cur.join('\n');
+            if (inp) inp.value = '';
+            refreshFormTodos();
+        }
+
+        function bindTodoRows(box) {
+            if (!box || !box.querySelectorAll) return;
+            box.querySelectorAll('[data-todo]').forEach(cb => {
+                cb.onchange = () => toggleTodo(cb.getAttribute('data-todo'), cb.checked);
+            });
+            box.querySelectorAll('[data-todo-date]').forEach(d => {
+                d.onchange = () => setTodoDate(d.getAttribute('data-todo-date'), d.value);
+            });
+            box.querySelectorAll('[data-del-todo]').forEach(b => {
+                b.onclick = ev => { ev.preventDefault(); ev.stopPropagation();
+                                    deleteTodo(b.getAttribute('data-del-todo')); };
+            });
+            box.querySelectorAll('[data-del-pending]').forEach(b => {
+                b.onclick = ev => {
+                    ev.preventDefault();
+                    const i = Number(b.getAttribute('data-del-pending'));
+                    const cur = todoLines($('resolution') ? $('resolution').value : '');
+                    cur.splice(i, 1);
+                    $('resolution').value = cur.join('\n');
+                    refreshFormTodos();
+                };
+            });
+        }
+
+        // 改完成日期（漏勾的補登：勾了之後可以回去改）
+        async function setTodoDate(id, dateStr) {
+            const iso = dateStr ? new Date(dateStr + 'T12:00:00').toISOString() : null;
+            const { error } = await supabase.from('item_todos')
+                .update({ done_at: iso }).eq('id', id).select('id');
+            if (error) {
+                say('listMsg', '完成日期更新失敗：' + error.message, 'error');
+                return renderEntries();
+            }
+            const t = TODOS.find(x => x.id === id);
+            if (t) t.done_at = iso;
+            renderEntries();
+            refreshFormTodos();
         }
 
         function boardItem(it) {
@@ -1615,15 +1749,9 @@
         function bindEntryActions(box) {
             const sheetClose = box.querySelector && box.querySelector('.sheet-close');
             if (sheetClose) sheetClose.onclick = () => closeItemSheet();
-            box.querySelectorAll('[data-todo]').forEach(cb => {
-                cb.onchange = () => toggleTodo(cb.getAttribute('data-todo'), cb.checked);
-            });
+            bindTodoRows(box);
             box.querySelectorAll('[data-add-todo]').forEach(b => {
                 b.onclick = () => addTodo(b.getAttribute('data-add-todo'));
-            });
-            box.querySelectorAll('[data-del-todo]').forEach(b => {
-                b.onclick = ev => { ev.preventDefault(); ev.stopPropagation();
-                                    deleteTodo(b.getAttribute('data-del-todo')); };
             });
             box.querySelectorAll('[data-del]').forEach(btn => {
                 btn.onclick = () => deleteEntry(btn.getAttribute('data-del'));
@@ -1738,7 +1866,6 @@
                     補<strong>舊照片</strong>時改成拍攝當天 —— 系統會依拍攝日期把照片排到正確的位置。</div>
                 <div class="add-photo-bar">
                     <button type="button" class="ghost small" id="ee-pick-photos">📷 選擇照片</button>
-                    <button type="button" class="ghost small" id="ee-add-photo-url">＋ 新增一張網址</button>
                 </div>
                 <input type="file" id="ee-photo-files" accept="image/*" multiple class="hidden">
                 <div id="ee-photo-preview"></div>
@@ -1825,6 +1952,7 @@
             }
             const addUrl = box.querySelector('#ee-add-photo-url');
             if (addUrl) addUrl.onclick = () => { EDIT_URLS.push({ url: '', desc: '' }); renderEditUrlRows(); };
+            // （「＋新增一張網址」按鈕已移除；EDIT_URLS 保留給既有的網址列編輯）
 
             // 完成勾選 vs「未完成時的狀態」：勾了已完成就沒有未完成狀態可言
             const cmp = box.querySelector('#ee-complete');
@@ -2187,7 +2315,6 @@
         // ---------- 綁定 ----------
         $('loginBtn').onclick = signIn;
         $('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
-        $('addPhotoBtn').onclick = () => addPhotoRow();
         // 送出＝永遠新增一筆紀錄（每一次上傳自成一筆）
         $('submitBtn').onclick = () => submitEntry();
         $('changePwBtn').onclick = changePassword;
@@ -2216,7 +2343,12 @@
         // 文字欄是唯一來源：直接打字也要即時更新面板
         if ($('work_type')) $('work_type').addEventListener('input', () => refreshPair());
 
-        // 拍照 / 選檔 / 拖放
+        // 拍照（可連續：每按一次加一張，不會蓋掉前面拍的）/ 選檔 / 拖放
+        $('cameraBtn').onclick = () => $('cameraFiles').click();
+        $('cameraFiles').addEventListener('change', e => {
+            addFiles(e.target.files);
+            e.target.value = '';   // 允許再拍同一張／再一次
+        });
         $('dropZone').onclick = () => $('photoFiles').click();
         $('photoFiles').addEventListener('change', e => {
             addFiles(e.target.files);
