@@ -434,6 +434,7 @@
         </div>
     </div>
 
+    <script src="board.js"></script>
     <script>
 
         // Supabase Configuration
@@ -464,9 +465,7 @@
         const PLACEHOLDER_CARD = 'https://via.placeholder.com/400x300?text=No+Image';
         const PLACEHOLDER_MODAL = 'https://via.placeholder.com/800x600?text=No+Image';
 
-        // 狀態標籤（公開頁不顯示專案費用與負責人）
-        const STATUS_LABEL = { '': '開案', completed: '已完成', in_progress: '進行中', paused: '暫停' };
-        const STATUS_CLASS = { '': 'opened', completed: 'done', in_progress: 'doing', paused: 'paused' };
+        // 狀態標籤／分組順序／buildTree 都在 board.js（跟後台共用同一套邏輯）
 
         // 紀錄人是後加的欄位，公開頁用「外掛視圖」讀（v_public_logs_ext / v_public_photos_ext）。
         // SQL 還沒跑的話就自動退回原本的視圖（只是不會顯示紀錄人）—— 不會壞掉，也不需要偵測。
@@ -519,91 +518,6 @@
             const ca = a.created_at || '', cb = b.created_at || '';
             if (ca !== cb) return ca < cb ? -1 : 1;
             return uploadSeq(a) - uploadSeq(b);
-        }
-
-        // ---------------- 樹狀：狀態 → 工項 → 紀錄 ----------------
-        // 一個「工項」＝一條時間軸。分組看的是**工項的狀態**（不是單筆紀錄的狀態）。
-        const STATUS_ORDER = ['', 'in_progress', 'paused', 'completed'];
-        const GROUP_TITLE = { '': '開案（待辦）', in_progress: '進行中', paused: '暫停', completed: '已完成' };
-        // 已完成＝做完的，預設收起來，資料多時才找得到東西
-        const COLLAPSED_BY_DEFAULT = { completed: true };
-
-        function daysSince(d) {
-            if (!d) return null;
-            const ms = Date.now() - new Date(String(d) + 'T00:00:00').getTime();
-            if (isNaN(ms)) return null;
-            return ms < 0 ? 0 : Math.floor(ms / 86400000);
-        }
-
-        function fmtMonthDay(d) {
-            const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
-            return m ? `${Number(m[2])}/${Number(m[3])}` : String(d || '');
-        }
-
-        // 待辦事項：一筆紀錄的 resolution 可能是一行一項
-        function todoLines(v) {
-            if (!v) return [];
-            return String(v).split(/\r?\n/)
-                .map(s => s.replace(/^[\s\-–—•・*]+/, '').trim())
-                .filter(Boolean);
-        }
-
-        // 純函式（方便測試）：把紀錄整理成 狀態 → 工項 → 紀錄 三層
-        function buildTree(logs) {
-            const byItem = new Map();
-            for (const l of (logs || [])) {
-                if (!l.item_id) continue;
-                if (!byItem.has(l.item_id)) byItem.set(l.item_id, []);
-                byItem.get(l.item_id).push(l);
-            }
-            const groups = STATUS_ORDER.map(st => ({ status: st, title: GROUP_TITLE[st], items: [] }));
-            const byStatus = new Map(groups.map(g => [g.status, g]));
-            for (const [itemId, list] of byItem) {
-                // 舊 → 新
-                const sorted = [...list].sort((a, b) =>
-                    String(a.log_date || '').localeCompare(String(b.log_date || '')));
-                const last = sorted[sorted.length - 1];
-                const raw = (last.item_status === null || last.item_status === undefined)
-                    ? last.progress_status : last.item_status;
-                const st = STATUS_ORDER.indexOf(raw) >= 0 ? raw : '';
-                let shots = 0;
-                for (const l of sorted) shots += (l.photos ? l.photos.length : 0);
-                byStatus.get(st).items.push({
-                    itemId, status: st,
-                    title: last.item_title || '（未命名工項）',
-                    loc: last.node_name || last.location || '',
-                    logs: sorted, shots,
-                    byNames: [...new Set(sorted.map(x => x.recorder_name).filter(Boolean))],
-                    opening: sorted[0].log_date || '',
-                    days: daysSince(sorted[0].log_date),
-                });
-            }
-            for (const g of groups) {
-                // 未完成：開案最久的排上面（放越久越要看到）；已完成：最新的排上面
-                g.items.sort((a, b) => g.status === 'completed'
-                    ? String(b.opening).localeCompare(String(a.opening))
-                    : String(a.opening).localeCompare(String(b.opening)));
-            }
-            // 看板固定四欄（空的也留著，才看得出整個結構；空欄顯示 0）
-            const shown = groups.slice();
-
-            // 沒有指定工項的紀錄（只記現場狀況）也不能消失 —— 收在最後一組，各自一列
-            const loose = (logs || []).filter(l => !l.item_id)
-                .sort((a, b) => String(b.log_date || '').localeCompare(String(a.log_date || '')));
-            if (loose.length) {
-                shown.push({
-                    status: '_loose', title: '未歸類（只記現場狀況）',
-                    items: loose.map(l => ({
-                        itemId: 'log:' + l.id, status: '_loose',
-                        title: (l.main_description || '').split('\n')[0].slice(0, 24) || '現場狀況',
-                        loc: l.node_name || l.location || '',
-                        logs: [l], shots: (l.photos ? l.photos.length : 0),
-                        byNames: l.recorder_name ? [l.recorder_name] : [],
-                        opening: l.log_date || '', days: daysSince(l.log_date),
-                    })),
-                });
-            }
-            return shown;
         }
 
         function shotFigure(ph, log) {

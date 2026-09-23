@@ -154,6 +154,82 @@
             border: 1px solid transparent;
         }
         .badge.done { background: #e7f4e8; color: #2e7d32; border-color: #bfe0c2; }
+
+        /* ---------------- 新增紀錄：可收合 ---------------- */
+        .fold-head {
+            display: flex; align-items: center; gap: 10px;
+            cursor: pointer; user-select: none; margin-bottom: 4px;
+        }
+        .fold-head h2 { margin: 0; }
+        .fold-caret { margin-left: auto; color: var(--color-muted); font-size: 0.9rem; }
+
+        /* ---------------- 看板：狀態 → 工項 → 紀錄（與公開頁同一套）---------------- */
+        .tree { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; align-items: start; }
+        .grp {
+            padding: 0.4rem 0.9rem 0.9rem; border-radius: 6px;
+            background: rgba(90, 77, 63, 0.035); border: 1px solid rgba(90, 77, 63, 0.10);
+        }
+        .grp-empty { color: var(--color-muted); font-size: 0.8rem; padding: 0.7rem 0.2rem; }
+        .grp-head {
+            display: flex; align-items: baseline; gap: 0.6rem; padding: 0.5rem 0.2rem;
+            border-bottom: 2px solid rgba(90, 77, 63, 0.25); cursor: pointer; user-select: none;
+        }
+        .grp-title { font-size: 1.05rem; font-weight: 500; letter-spacing: 0.06em; }
+        .grp-count { font-size: 0.75rem; color: var(--color-muted); }
+        .grp-caret { margin-left: auto; font-size: 0.8rem; color: var(--color-muted); }
+        .grp.collapsed .grp-caret { transform: rotate(-90deg); }
+        .grp.collapsed .grp-body { display: none; }
+
+        .item-row { border-bottom: 1px solid rgba(90, 77, 63, 0.12); }
+        .item-head {
+            display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem 0.7rem;
+            padding: 0.8rem 0.2rem; cursor: pointer;
+        }
+        .item-head:hover { background: rgba(90, 77, 63, 0.04); }
+        .it-loc { font-size: 0.85rem; color: var(--color-accent); opacity: 0.75; }
+        .it-title { font-size: 1rem; font-weight: 500; }
+        .it-meta { flex-basis: 100%; font-size: 0.75rem; color: var(--color-muted); }
+        .it-meta-short { display: none; }
+        .it-caret { font-size: 0.75rem; color: var(--color-muted); }
+        .item-row.open .it-caret { transform: rotate(90deg); }
+        .item-body { display: none; padding: 0.4rem 0.2rem 1.2rem 0.6rem; }
+        .item-row.open .item-body { display: block; }
+
+        .chip {
+            font-size: 0.72rem; padding: 0.1rem 0.5rem; border-radius: 999px;
+            background: rgba(168, 162, 158, 0.25); color: var(--color-accent); white-space: nowrap;
+        }
+        .chip.opened { background: rgba(61, 53, 45, 0.10); color: #6b6156; }
+        .chip.done { background: rgba(107, 142, 92, 0.25); color: #4a6b3d; }
+        .chip.doing { background: rgba(191, 139, 46, 0.22); color: #8a6a1e; }
+        .chip.paused { background: rgba(139, 46, 46, 0.15); color: #8b5454; }
+
+        .rec { border-left: 2px solid rgba(90, 77, 63, 0.18); padding: 0 0 1rem 0.9rem; }
+        .rec-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; font-size: 0.78rem; color: var(--color-muted); margin-bottom: 0.4rem; }
+        .rec-date { font-weight: 500; color: var(--color-accent); font-size: 0.85rem; }
+        .rec-by { font-size: 0.75rem; }
+        .rec-desc { font-size: 0.92rem; margin-bottom: 0.4rem; white-space: pre-wrap; }
+        .rec-todo { font-size: 0.82rem; color: var(--color-accent); opacity: 0.85; margin-bottom: 0.4rem; white-space: pre-wrap; }
+        .rec-thumb { max-width: 100%; border-radius: 4px; margin: 0.3rem 0; display: block; }
+        .rec-actions { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
+
+        /* 窄螢幕：四欄只有 ~105px，縮小字級、摘要換短版 */
+        @media (max-width: 700px) {
+            .tree { gap: 0.3rem; }
+            .grp { padding: 0.25rem 0.35rem 0.5rem; }
+            .grp-head { gap: 0.25rem; padding: 0.4rem 0.1rem; flex-wrap: wrap; }
+            .grp-title { font-size: 0.78rem; letter-spacing: 0; line-height: 1.3; }
+            .grp-count { font-size: 0.68rem; }
+            .grp-caret, .it-caret { display: none; }
+            .item-head { padding: 0.5rem 0.05rem; gap: 0.15rem 0.3rem; }
+            .it-loc { font-size: 0.68rem; }
+            .it-title { font-size: 0.8rem; line-height: 1.35; }
+            .chip { font-size: 0.62rem; padding: 0.05rem 0.35rem; }
+            .it-meta { display: none; }
+            .it-meta-short { display: block; flex-basis: 100%; font-size: 0.62rem; color: var(--color-muted); }
+            .rec { padding-left: 0.5rem; }
+            .rec-actions { flex-wrap: wrap; }
+        }
         /* 在編輯表單裡追加照片 */
         .edit-block .add-photo-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
         .edit-block .add-photo-bar button { width: auto; padding: 6px 12px; font-size: 12px; }
@@ -202,11 +278,14 @@
             <button id="loginBtn">登入</button>
         </div>
 
-        <!-- 新增紀錄 -->
+        <!-- 新增紀錄（預設收起來，點標題才展開）-->
         <div class="card hidden" id="formCard">
-            <h2>新增工程紀錄</h2>
             <div id="formMsg"></div>
-
+            <div class="fold-head" id="formHead">
+                <h2>＋ 新增工程紀錄</h2>
+                <span class="fold-caret">▸</span>
+            </div>
+            <div id="formWrap" class="fold-body hidden">
             <div class="form-group">
                 <label>所屬專案 *</label>
                 <select id="project_id"><option value="">載入中…</option></select>
@@ -302,6 +381,7 @@
             </div>
 
             <button id="submitBtn">新增紀錄</button>
+            </div><!-- /formWrap -->
         </div>
 
         <!-- 帳號設定 -->
@@ -347,6 +427,7 @@
         </div>
     </main>
 
+    <script src="board.js"></script>
     <script type="module">
         import { supabase } from './supabase-client.js';
 
@@ -1009,6 +1090,7 @@
             $('submitBtn').disabled = false;
             say('formMsg', `✅ 已新增 1 筆紀錄${photos.length ? ` 與 ${photos.length} 張照片` : ''}${pair}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
             clearForm();
+            setFormOpen(false);   // 收起來，回到看板（成功訊息留在標題上方）
             await loadEntries();
             await loadStructureOptions($('project_id').value);   // 更新工項清單與進度卡狀態
         }
@@ -1036,7 +1118,7 @@
         let editingEntryId = null;   // 正在編輯哪一筆（null = 沒在編輯）
         let editStruct = null;       // 該筆所屬專案的結構（地點/項目下拉用）
         // 狀態標籤：''/null ＝「開案」（已建立、還沒動工）—— 和「進行中」是不同的狀態
-        const STATUS_LABEL = { '': '開案', in_progress: '進行中', paused: '暫停', completed: '已完成' };
+        // 狀態標籤／分組順序／buildTree 都在 board.js（跟公開頁共用同一套邏輯）
         const statusText = s => STATUS_LABEL[s || ''] || '開案';
         // 編輯表單裡「追加照片」的暫存 —— renderEntries() 會整個重繪，所以狀態放在外面
         let EDIT_FILES = [];         // [{ file, desc }]
@@ -1131,53 +1213,126 @@
             });
         }
 
+        // ---------- 新增紀錄表單：預設收起來，點標題才展開 ----------
+        // 為什麼：平常進來是要「看／編」既有紀錄，表單攤開會擋住看板。
+        function setFormOpen(open) {
+            const wrap = $('formWrap');
+            if (!wrap) return;
+            const show = (open === undefined) ? wrap.classList.contains('hidden') : !!open;
+            wrap.classList.toggle('hidden', !show);
+            const caret = $('formHead') && $('formHead').querySelector('.fold-caret');
+            if (caret) caret.textContent = show ? '▾' : '▸';
+        }
+
+        // ---------- 看板（與公開頁 board.js 共用同一套結構：狀態 → 工項 → 紀錄）----------
+        // 把 entry 轉成 buildTree 要的形狀；src 保留原始 entry（編輯表單要用）
+        function entryToLog(e) {
+            return {
+                id: e.id, src: e,
+                log_date: e.log_date, item_id: e.item_id,
+                item_status: e.items ? e.items.status : null,
+                item_created_at: e.items ? e.items.created_at : null,
+                item_title: e.items ? workTypeOf(e.items) : '',
+                node_name: e.node_name, location: e.location,
+                photos: e.log_photos || [],
+                recorder_name: e.recorder_name,
+                progress_status: e.progress_status,
+                main_description: e.main_description,
+                resolution: e.resolution,
+            };
+        }
+
+        // 待辦事項只在「這個工項還沒完成」時顯示（做完了就不用再提醒）
+        const todosShown = e => !(e.items && e.items.status === 'completed');
+
+        // 一筆紀錄（工項展開後看到的）
+        function boardRecord(l) {
+            const e = l.src;
+            const isDone = !!(e.items && e.items.status === 'completed');
+            const showTodo = todosShown(e);
+            const todos = todoLines(e.resolution);
+            const recName = HAS_RECORDER ? String(e.recorder_name || '').trim() : '';
+            const photo = (e.log_photos && e.log_photos[0]) || {};
+            return `<div class="rec">
+                <div class="rec-head">
+                    <span class="rec-date">${esc(e.log_date)}${e.log_time ? ' ' + esc(String(e.log_time).slice(0, 5)) : ''}</span>
+                    ${recName ? `<span class="rec-by">紀錄：${esc(recName)}</span>` : ''}
+                    ${isDone ? '<span class="badge done">已完成</span>' : ''}
+                </div>
+                ${e.main_description ? `<div class="rec-desc">${esc(e.main_description)}</div>` : ''}
+                ${(showTodo && todos.length) ? `<div class="rec-todo">待辦：${esc(todos.join('、'))}</div>` : ''}
+                ${photo.photo_url
+                    ? `<img class="rec-thumb" src="${esc(photo.photo_url)}" alt="" onerror="this.style.visibility='hidden'">`
+                    : ''}
+                ${editingEntryId === e.id ? renderEditForm(e) : ''}
+                <div class="rec-actions">
+                    <button class="ghost small" data-edit="${esc(e.id)}">編輯</button>
+                    <button class="danger small" data-del="${esc(e.id)}">刪除</button>
+                </div>
+            </div>`;
+        }
+
+        function boardItem(it) {
+            const meta = [];
+            if (it.opening) meta.push(fmtMonthDay(it.opening) + ' 開案');
+            if (it.status !== 'completed' && it.days !== null) meta.push('已 ' + it.days + ' 天');
+            meta.push(it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片');
+            if (it.byNames.length) meta.push(it.byNames.join('、'));
+            const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`;
+            return `<div class="item-row" data-item="${esc(it.itemId)}">
+                <div class="item-head" data-item-head>
+                    ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
+                    <span class="it-title">${esc(it.title)}</span>
+                    ${it.status !== '_loose'
+                        ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`
+                        : ''}
+                    <span class="it-caret">▸</span>
+                    <div class="it-meta">${esc(meta.join(' · '))}</div>
+                    <div class="it-meta-short">${esc(short)}</div>
+                </div>
+                <div class="item-body">${it.logs.map(boardRecord).join('')}</div>
+            </div>`;
+        }
+
         function renderEntries() {
             const box = $('entries');
             if (!entryList.length) {
                 box.innerHTML = '<div class="hint">目前尚無紀錄。</div>';
                 return;
             }
-            box.innerHTML = entryList.map(e => {
-                const photo = (e.log_photos && e.log_photos[0]) || {};
-                const itemTitle = e.items ? workTypeOf(e.items) : '';
-                const metaBits = [itemTitle,
-                    entryRank(e) === 0 ? statusText(e.items && e.items.status) : ''].filter(Boolean);
-                // 未完成的：把「已開案幾天」寫出來，一眼看出哪個擱最久
-                if (entryRank(e) === 0) {
-                    const d = openDays(e);
-                    if (d !== null) metaBits.push(d === 0 ? '今天開案' : `已開案 ${d} 天`);
-                }
-                // 「已完成」看的是**進度卡現在的狀態**（items.status 是唯一真相）
-                const isDone = !!(e.items && e.items.status === 'completed');
-                // 待辦事項：未完成的紀錄才顯示（一行一項）
-                const todoLines = String(e.resolution || '').split('\n')
-                    .map(s => s.trim()).filter(Boolean);
-                // 紀錄人（誰上傳的這筆紀錄）
-                const recName = HAS_RECORDER ? String(e.recorder_name || '').trim() : '';
-                const todoHtml = (entryRank(e) === 0 && todoLines.length)
-                    ? `<div class="todo"><span class="todo-head">待辦 ${todoLines.length} 項</span>`
-                        + todoLines.map(x => `<div class="todo-item">・${esc(x)}</div>`).join('')
-                        + '</div>'
-                    : '';
-                return `
-                <div class="entry">
-                    <img src="${esc(photo.photo_url || '')}" alt="" onerror="this.style.visibility='hidden'">
-                    <div class="body">
-                        <div class="title">${esc(e.log_date)} · ${esc(e.location || '未標記位置')}</div>
-                        <div class="meta">${esc(metaBits.join(' · '))}</div>
-                        ${recName ? `<div class="recorder">紀錄：${esc(recName)}</div>` : ''}
-                        <div class="desc">${esc(e.main_description || '')}</div>
-                        ${todoHtml}
-                        ${editingEntryId === e.id ? renderEditForm(e) : ''}
+            const groups = buildTree(entryList.map(entryToLog));
+            box.innerHTML = `<div class="tree">${groups.map(g => `
+                <div class="grp${COLLAPSED_BY_DEFAULT[g.status] ? ' collapsed' : ''}">
+                    <div class="grp-head" data-grp-head>
+                        <span class="grp-title">${esc(g.title)}</span>
+                        <span class="grp-count">${g.items.length}</span>
+                        <span class="grp-caret">▾</span>
                     </div>
-                    <div class="entry-actions">
-                        ${isDone ? '<span class="badge done">已完成</span>' : ''}
-                        <button class="ghost small" data-edit="${esc(e.id)}">編輯</button>
-                        <button class="danger small" data-del="${esc(e.id)}">刪除</button>
-                    </div>
-                </div>`;
-            }).join('');
+                    <div class="grp-body">${g.items.length
+                        ? g.items.map(boardItem).join('')
+                        : '<div class="grp-empty">—</div>'}</div>
+                </div>`).join('')}</div>`;
 
+            box.querySelectorAll('[data-grp-head]').forEach(h =>
+                h.onclick = () => h.closest('.grp').classList.toggle('collapsed'));
+            box.querySelectorAll('[data-item-head]').forEach(h =>
+                h.onclick = () => h.closest('.item-row').classList.toggle('open'));
+
+            // 正在編輯的那一筆 → 自動展開它所屬的工項並捲到它（不然會找不到表單）
+            if (editingEntryId) {
+                box.querySelectorAll('.item-row').forEach(row => {
+                    if (row.querySelector(`[data-edit="${editingEntryId}"]`)) {
+                        row.classList.add('open');
+                        const g = row.closest('.grp');
+                        if (g) g.classList.remove('collapsed');
+                        row.scrollIntoView({ block: 'center' });
+                    }
+                });
+            }
+            bindEntryActions(box);
+        }
+
+        function bindEntryActions(box) {
             box.querySelectorAll('[data-del]').forEach(btn => {
                 btn.onclick = () => deleteEntry(btn.getAttribute('data-del'));
             });
@@ -1678,6 +1833,7 @@
         $('changePwBtn').onclick = changePassword;
         $('saveNameBtn').onclick = saveDisplayName;
         $('reorderBtn').onclick = reorderAllPhotos;
+        $('formHead').onclick = () => setFormOpen();   // 點標題 → 展開／收起
         $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); showLogin(); };
 
         // 換專案 → 重載該專案的地點與工項，並清掉上一個專案的「最新紀錄」面板
