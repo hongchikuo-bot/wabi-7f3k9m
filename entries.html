@@ -1101,6 +1101,7 @@
                 $('entries').innerHTML = `<div class="msg error">讀取失敗：${esc(error.message)}</div>`;
                 return;
             }
+            EARLIEST_LOG_DATE = buildEarliestMap(data);
             entryList = sortEntries(data || []);
             renderEntries();
         }
@@ -1112,8 +1113,30 @@
         //   ③ 已完成 → 最下面，新的在前
         const isDoneLog = e => !!(e.items && e.items.status === 'completed');
         const entryRank = e => (!e.item_id ? 1 : (isDoneLog(e) ? 2 : 0));
-        // 開案時間＝那張進度卡的建立時間（沒有就退回這筆紀錄的日期）
-        const openedAt = e => (e.items && e.items.created_at) || e.log_date || '';
+        // 開案時間＝「那張進度卡的建立時間」與「該工項最早的紀錄日期」兩者較早的。
+        // ⚠️ 只用 items.created_at 會錯：在舊紀錄上第一次填工項時，卡片是「今天」才建的，
+        //    但那個案子其實從紀錄那天就開始了（實測：9/17 的三筆會變成「今天開案」）。
+        let EARLIEST_LOG_DATE = new Map();   // item_id → 最早的紀錄日期
+
+        function buildEarliestMap(list) {
+            const m = new Map();
+            for (const e of (list || [])) {
+                if (!e.item_id || !e.log_date) continue;
+                const d = String(e.log_date).slice(0, 10);
+                const cur = m.get(e.item_id);
+                if (!cur || d < cur) m.set(e.item_id, d);
+            }
+            return m;
+        }
+
+        const openedAt = e => {
+            const cands = [
+                (e.items && e.items.created_at) ? String(e.items.created_at).slice(0, 10) : '',
+                e.item_id ? (EARLIEST_LOG_DATE.get(e.item_id) || '') : '',
+                String(e.log_date || '').slice(0, 10)
+            ].filter(Boolean).sort();
+            return cands[0] || '';
+        };
         // 未完成擱了幾天（用來看「最久沒完成」）
         const openDays = e => {
             const d = String(openedAt(e) || '').slice(0, 10);
@@ -1134,7 +1157,11 @@
                     // ① 未完成：開案越久越上面
                     let c = asc(openedAt(a), openedAt(b));
                     if (c) return c;
-                    // 同一個開案時間（例如同一次批次建立）→ 用案件 id 固定先後，讓紀錄聚在一起
+                    // 同一天開案（常見：好幾筆舊紀錄同一天補上工項）→ 用卡片建立的精確時間，
+                    // 也就是「你先開哪一張」，不要用 uuid 排（那樣順序沒有意義）
+                    c = asc((a.items && a.items.created_at) || '', (b.items && b.items.created_at) || '');
+                    if (c) return c;
+                    // 完全同時（例如同一次批次建立）→ 用案件 id 固定先後，讓紀錄聚在一起
                     c = asc(a.item_id, b.item_id);
                     if (c) return c;
                 }
