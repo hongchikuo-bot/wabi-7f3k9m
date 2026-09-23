@@ -124,6 +124,22 @@
         .entry .title { font-weight: 600; font-size: 14px; }
         .entry .meta { font-size: 12px; color: var(--color-muted); }
         .entry .desc { font-size: 13px; margin-top: 4px; word-break: break-word; }
+        /* 已完成標示（來源：進度卡 items.status，不是這筆紀錄的快照） */
+        .badge {
+            display: inline-block; font-size: 11px; line-height: 1.7;
+            padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+            border: 1px solid transparent;
+        }
+        .badge.done { background: #e7f4e8; color: #2e7d32; border-color: #bfe0c2; }
+        /* 在編輯表單裡追加照片 */
+        .edit-block .add-photo-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .edit-block .add-photo-bar button { width: auto; padding: 6px 12px; font-size: 12px; }
+        .edit-block .ee-photo-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+        .edit-block .ee-photo-row img {
+            width: 60px; height: 45px; object-fit: cover; border-radius: 4px; flex: none; background: #eee;
+        }
+        .edit-block .ee-photo-row input[type=text] { flex: 1; }
+        .edit-block .ee-photo-row button { width: auto; padding: 5px 10px; font-size: 11px; }
         #status { font-size: 13px; color: var(--color-muted); }
         .drop-zone {
             border: 2px dashed var(--color-line); border-radius: 6px;
@@ -184,16 +200,31 @@
                 </div>
             </div>
 
+            <!-- ① 地點在最上層（後台維護，固定不變）-->
             <div class="form-group">
-                <label>項目（選填）</label>
-                <select id="item_id"><option value="">（先選上方專案）</option></select>
+                <label>地點 / 區域 *</label>
+                <select id="node_id"><option value="">（先選上方專案）</option></select>
                 <div class="hint">
-                    選了項目，這張照片就會進入該項目的「進度對照」時間軸。
-                    項目是在後台（<code>app.html</code>）的「③ 項目」裡建立的。
+                    只能從後台建立過的節點挑選，避免打字不一致導致前後照片對不起來。
+                    找不到你要的地點？先到後台建立節點再回來。
                 </div>
             </div>
 
-            <!-- 選了項目才出現：該項目的最新紀錄 + 兩種模式 -->
+            <!-- ② 工項在下一層：整個專案共用一份清單，也可以直接打新的 -->
+            <div class="form-group">
+                <label>工項（選填）</label>
+                <select id="workTypePick"><option value="">（先選上方專案）</option></select>
+                <input type="text" id="work_type"
+                       placeholder="例：主牆塗漿 —— 也可以直接打一個新的">
+                <div class="hint">
+                    從下拉挑<strong>用過的</strong>工項，或直接打一個新的。
+                    打了新的，系統會自動建立「這個地點 × 這個工項」的進度卡，
+                    <strong>不必先回後台建立</strong>。<br>
+                    留空 ＝ 只記錄這個地點的現場狀況，不歸屬任何工項。
+                </div>
+            </div>
+
+            <!-- 選了地點 ＋ 工項才出現：該進度卡的最新紀錄 + 兩種模式 -->
             <div id="latestWrap" class="hidden">
                 <div id="latestPanel"></div>
                 <div class="mode-tabs">
@@ -211,21 +242,12 @@
                 <div class="hint">這段文字會<strong>附加</strong>到那筆紀錄的備註，不會蓋掉原本的內容。</div>
             </div>
 
-            <div class="form-group">
-                <label>地點 / 區域 *</label>
-                <select id="node_id"><option value="">（先選上方專案）</option></select>
-                <div class="hint">
-                    只能從後台建立過的節點挑選，避免打字不一致導致前後照片對不起來。
-                    找不到你要的地點？先到後台建立節點再回來。
-                </div>
-            </div>
-
             <div class="form-group" id="completeWrap" style="display:none">
                 <label class="check-line">
                     <input type="checkbox" id="mark_complete">
-                    <span>這次拍攝後，這個項目<strong>已完成</strong></span>
+                    <span>這次拍攝後，這個工項<strong>已完成</strong></span>
                 </label>
-                <div class="hint">勾選後，會自動把這個項目的狀態改成「已完成」（進度以項目為準）。</div>
+                <div class="hint">勾選後，會自動把「這個地點的這個工項」狀態改成「已完成」（進度以進度卡為準）。</div>
             </div>
 
             <div class="form-group">
@@ -373,10 +395,19 @@
                 (data || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
         }
 
-        // ---------- 專案結構：節點（地點）與項目（比對錨點）----------
+        // ---------- 專案結構：地點（節點）與工項（進度卡）----------
         // 節點路徑與項目資料都存成 Map，送出時直接查，不重複打 API
         let NODE_PATHS = new Map();   // node_id  → "1F / 客廳 / 主牆"
-        let ITEMS_BY_ID = new Map();  // item_id  → { title, status, node_id }
+        let ITEMS_BY_ID = new Map();  // item_id  → { title, status, node_id, work_type }
+        let WORK_TYPES = [];          // 整個專案用過的工項清單（去重、排序）
+
+        // 工項名稱的定義與後台一致：沒填 work_type 就退回用項目名稱
+        const workTypeOf = i => String((i && (i.work_type || i.title)) || '').trim();
+        // 比對用的正規化：忽略前後與中間空白、大小寫
+        const normWT = s => String(s || '').trim().replace(/\s+/g, '').toLowerCase();
+        const uniqSorted = arr => [...new Set(arr.filter(v => v !== null && v !== undefined && String(v).trim()))]
+            .map(v => String(v).trim())
+            .sort((a, b) => a.localeCompare(b, 'zh-TW'));
 
         // 把地點攤平成「由上到下」＋縮排深度（同一棵樹，跨階層，只看 parent_id）
         function flatNodes(nodes) {
@@ -400,15 +431,12 @@
             return out;
         }
 
-        const itemStatusLabel = s =>
-            ({ completed: '（已完成）', in_progress: '（進行中）', paused: '（暫停）' }[s] || '');
-
-        // 取得某專案的結構（節點完整路徑 + 項目），供「地點/項目下拉」與「編輯紀錄」共用
+        // 取得某專案的結構（節點完整路徑 + 項目），供「地點/工項下拉」與「編輯紀錄」共用
         async function fetchStructure(projectId) {
             const [lv, nd, it] = await Promise.all([
                 supabase.from('hierarchy_levels').select('*').eq('project_id', projectId).order('level_index'),
                 supabase.from('hierarchy_nodes').select('*').eq('project_id', projectId).order('sort_order'),
-                supabase.from('items').select('id, title, status, node_id').eq('project_id', projectId).order('created_at')
+                supabase.from('items').select('id, title, status, node_id, work_type').eq('project_id', projectId).order('created_at')
             ]);
             const err = lv.error || nd.error || it.error;
             if (err) throw new Error(err.message);
@@ -433,25 +461,32 @@
             const PICK = '<option value="">（先選上方專案）</option>';
             if (!projectId) {
                 $('node_id').innerHTML = PICK;
-                $('item_id').innerHTML = PICK;
+                $('workTypePick').innerHTML = PICK;
                 NODE_PATHS = new Map();
                 ITEMS_BY_ID = new Map();
+                WORK_TYPES = [];
+                if ($('work_type')) $('work_type').value = '';
                 syncCompleteCheckbox();
+                await refreshPair();
                 return;
             }
-            let levels, nodes, items;
+            // 重繪下拉時要保留使用者已經選好的值（不要跳掉）
+            const keepNode = $('node_id').value;
+            const keepWT = $('work_type') ? $('work_type').value : '';
+
+            let nodes, items;
             try {
                 const s = await fetchStructure(projectId);
-                levels = s.levels; nodes = s.nodes; items = s.items;
+                nodes = s.nodes; items = s.items;
                 NODE_PATHS = s.nodePaths;
                 ITEMS_BY_ID = new Map(items.map(i => [i.id, i]));
             } catch (err) {
                 $('node_id').innerHTML = '<option value="">（讀取失敗）</option>';
-                $('item_id').innerHTML = '<option value="">（讀取失敗）</option>';
+                $('workTypePick').innerHTML = '<option value="">（讀取失敗）</option>';
                 return say('formMsg', '讀取專案結構失敗：' + err.message, 'error');
             }
 
-            // 地點下拉：一棵樹 + 縮排 + 完整路徑
+            // ① 地點下拉：一棵樹 + 縮排 + 完整路徑
             // （同名地點（例如每層都有「客廳」）靠路徑區分，不會選錯）
             let html = nodes.length ? '<option value="">選擇地點…</option>'
                                     : '<option value="">（此專案尚無地點，請先到後台建立）</option>';
@@ -459,30 +494,83 @@
                 `<option value="${esc(node.id)}">${'　'.repeat(Math.min(depth, 6))}`
                 + `${esc(NODE_PATHS.get(node.id) || node.name)}</option>`).join('');
             $('node_id').innerHTML = html;
+            if (keepNode && NODE_PATHS.has(keepNode)) $('node_id').value = keepNode;
 
-            // 項目下拉：依所屬節點分組，一眼看出每個項目在哪
-            let ihtml = '<option value="">（不指定項目）</option>';
-            const groups = new Map();
-            for (const i of items) {
-                const k = i.node_id || '';
-                if (!groups.has(k)) groups.set(k, []);
-                groups.get(k).push(i);
-            }
-            for (const [nodeId, list] of groups) {
-                const label = (nodeId && NODE_PATHS.has(nodeId)) ? NODE_PATHS.get(nodeId) : '（未指定節點）';
-                ihtml += `<optgroup label="${esc(label)}">` +
-                    list.map(i => `<option value="${esc(i.id)}">${esc(i.title)}${itemStatusLabel(i.status)}</option>`).join('') +
-                    '</optgroup>';
-            }
-            $('item_id').innerHTML = ihtml;
+            // ② 工項下拉：**整個專案共用一份清單**（不再按樓層分組）
+            // 每個樓層重複的工項在這裡只出現一次；
+            // 進度仍然是「地點 × 工項」各自一條線 —— 那張卡由紀錄自動產生（ensureItemFor）。
+            WORK_TYPES = uniqSorted(items.map(workTypeOf));
+            $('workTypePick').innerHTML = '<option value="">✏️ 自己輸入 / 從清單挑…</option>'
+                + WORK_TYPES.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+            if ($('work_type')) $('work_type').value = keepWT;
+
             syncCompleteCheckbox();
+            await refreshPair();
         }
 
-        // 「這次拍攝後已完成」只在選了項目時出現（進度以項目為準）
+        // ---------- 「地點 × 工項」＝ 一張進度卡 ----------
+        // 不做「先列好待辦清單」那套：紀錄時打了新工項，這裡自動找／建那張卡。
+        function itemForPair(nodeId, workType) {
+            const key = normWT(workType);
+            if (!nodeId || !key) return null;
+            for (const i of ITEMS_BY_ID.values()) {
+                if (i.node_id === nodeId && normWT(workTypeOf(i)) === key) return i;
+            }
+            return null;
+        }
+
+        let CURRENT_ITEM_ID = null;
+
+        // 地點或工項一改變 → 重新對應到既有的進度卡（也可能還不存在），更新「最新紀錄」面板
+        async function refreshPair() {
+            const nodeId = $('node_id').value;
+            const wt = $('work_type') ? $('work_type').value.trim() : '';
+            const found = itemForPair(nodeId, wt);
+            CURRENT_ITEM_ID = found ? found.id : null;
+            syncCompleteCheckbox();
+            await loadLatestLogForItem(CURRENT_ITEM_ID, wt, nodeId);
+        }
+
+        // 找或建立 (地點 × 工項) 的進度卡，回傳 items 那一列
+        async function ensureItemFor(projectId, nodeId, workType) {
+            const wt = String(workType || '').trim();
+            if (!wt) return null;
+            const hit = itemForPair(nodeId, wt);
+            if (hit) return hit;
+
+            const key = normWT(wt);
+            const fetchPairRows = async () => {
+                // 只查這個地點，數量小；本地清單可能是舊的（別人剛建過）
+                const { data, error } = await supabase.from('items')
+                    .select('id, title, status, node_id, work_type')
+                    .eq('project_id', projectId).eq('node_id', nodeId);
+                if (error) throw new Error('查詢工項失敗：' + error.message);
+                return data || [];
+            };
+            const found = (await fetchPairRows()).find(i => normWT(workTypeOf(i)) === key);
+            if (found) { ITEMS_BY_ID.set(found.id, found); return found; }
+
+            const { data: created, error: cErr } = await supabase.from('items')
+                .insert([{ project_id: projectId, node_id: nodeId, title: wt, work_type: wt, status: 'in_progress' }])
+                .select().single();
+            if (cErr) {
+                // 23505 = 唯一限制（例如 UNIQUE(node_id, title)）→ 可能另一邊剛好建好了，再查一次
+                if (cErr.code === '23505') {
+                    const again = (await fetchPairRows()).find(i => normWT(workTypeOf(i)) === key);
+                    if (again) { ITEMS_BY_ID.set(again.id, again); return again; }
+                }
+                throw new Error('建立工項進度卡失敗：' + cErr.message);
+            }
+            ITEMS_BY_ID.set(created.id, created);
+            if (!WORK_TYPES.some(v => normWT(v) === key)) WORK_TYPES.push(wt);
+            return created;
+        }
+
+        // 「這次拍攝後已完成」只在填了工項時出現（進度以進度卡為準）
         function syncCompleteCheckbox() {
-            const hasItem = !!$('item_id').value;
-            $('completeWrap').style.display = hasItem ? 'block' : 'none';
-            if (!hasItem) $('mark_complete').checked = false;
+            const hasWT = !!($('work_type') && $('work_type').value.trim());
+            $('completeWrap').style.display = hasWT ? 'block' : 'none';
+            if (!hasWT) $('mark_complete').checked = false;
         }
 
         // ---------- 照片：檔案（拍照 / 選檔 / 拖放）----------
@@ -528,10 +616,11 @@
             }
         }
 
-        async function uploadPendingFiles(projectId) {
+        // 共用的上傳器：list = [{ file, desc }]，回傳可直接寫入 log_photos 的列
+        async function uploadFileList(list, projectId, onProgress) {
             const rows = [];
             let done = 0;
-            for (const item of pendingFiles) {
+            for (const item of list) {
                 const ext = (item.file.name.split('.').pop() || 'jpg').toLowerCase().slice(0, 5);
                 const path = `${projectId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
                 const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, item.file, {
@@ -543,10 +632,15 @@
                 const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
                 rows.push({ photo_url: data.publicUrl, photo_description: item.desc || null });
                 done++;
-                $('uploadProgress').textContent = `上傳中 ${done}/${pendingFiles.length}…`;
+                if (onProgress) onProgress(done, list.length);
             }
             return rows;
         }
+
+        const uploadPendingFiles = projectId => uploadFileList(
+            pendingFiles, projectId,
+            (done, total) => { $('uploadProgress').textContent = `上傳中 ${done}/${total}…`; }
+        );
 
         // ---------- 照片列（網址）----------
         function addPhotoRow(url = '', desc = '') {
@@ -580,14 +674,33 @@
         const fgOf = id => { const el = $(id); return el ? el.closest('.form-group') : null; };
         const setHidden = (el, hide) => { if (el) el.classList.toggle('hidden', !!hide); };
 
-        async function loadLatestLogForItem(itemId) {
+        // workType / nodeId 只用來顯示「你現在在看哪一張進度卡」
+        async function loadLatestLogForItem(itemId, workType, nodeId) {
             APPEND_TARGET = null;
             APPEND_PHOTO_COUNT = 0;
-            if (!itemId) {
+            const wt = String(workType || '').trim();
+            const where = (nodeId && NODE_PATHS.get(nodeId)) || '';
+            if (!wt) {
+                // 沒填工項＝不歸屬任何進度卡，沒有「進度對照」可言
                 $('latestWrap').classList.add('hidden');
                 setMode('new');
                 return;
             }
+            $('latestWrap').classList.remove('hidden');
+
+            const item = itemId ? (ITEMS_BY_ID.get(itemId) || {}) : {};
+            const st = { completed: '已完成', in_progress: '進行中', paused: '暫停' }[item.status] || '未設定';
+            const title = `${esc(wt)}${where ? '（' + esc(where) + '）' : ''}`;
+
+            if (!itemId) {
+                $('latestPanel').innerHTML =
+                    `<div class="latest-box">${title} <strong>尚無紀錄</strong>。
+                     這一筆會是它的<strong>起點</strong>。</div>`;
+                $('modeAppend').disabled = true;
+                setMode('new');
+                return;
+            }
+
             const { data, error } = await supabase
                 .from('project_logs')
                 .select('id, log_date, log_time, location, main_description, notes, log_photos(id)')
@@ -596,23 +709,18 @@
                 .order('created_at', { ascending: false })
                 .limit(1);
 
-            $('latestWrap').classList.remove('hidden');
-
             if (error) {
                 $('latestPanel').innerHTML =
-                    `<div class="msg error">讀取此項目的紀錄失敗：${esc(error.message)}</div>`;
+                    `<div class="msg error">讀取這個工項的紀錄失敗：${esc(error.message)}</div>`;
                 $('modeAppend').disabled = true;
                 setMode('new');
                 return;
             }
 
             const latest = (data || [])[0];
-            const item = ITEMS_BY_ID.get(itemId) || {};
-            const st = { completed: '已完成', in_progress: '進行中', paused: '暫停' }[item.status] || '未設定';
-
             if (!latest) {
                 $('latestPanel').innerHTML =
-                    `<div class="latest-box">此項目<strong>尚無紀錄</strong>（目前狀態：${esc(st)}）。
+                    `<div class="latest-box">${title} <strong>尚無紀錄</strong>（目前狀態：${esc(st)}）。
                      這一筆會是它的<strong>起點</strong>。</div>`;
                 $('modeAppend').disabled = true;
                 setMode('new');
@@ -624,9 +732,8 @@
             $('modeAppend').disabled = false;
             const t = latest.log_time ? ' ' + String(latest.log_time).slice(0, 5) : '';
             $('latestPanel').innerHTML = `<div class="latest-box">
-                此項目狀態：<strong>${esc(st)}</strong>
+                ${title} 狀態：<strong>${esc(st)}</strong>
                 ｜ 最新紀錄：<strong>${esc(latest.log_date)}</strong>${esc(t)}
-                ${latest.location ? '｜ ' + esc(latest.location) : ''}
                 ｜ 已有 <strong>${APPEND_PHOTO_COUNT}</strong> 張照片
                 ${latest.main_description
                     ? `<div class="hint">${esc(String(latest.main_description).slice(0, 60))}</div>` : ''}
@@ -643,8 +750,9 @@
             $('modeNew').classList.toggle('active', !append);
             $('modeAppend').classList.toggle('active', append);
 
+            // 地點與工項刻意**不隱藏**：補拍要看得見自己是補到哪一張進度卡
+            // （改了地點或工項，上方面板會跟著換成另一張卡）
             setHidden($('dateTimeRow'), append);
-            setHidden(fgOf('node_id'), append);
             setHidden($('completeWrap'), append);
             ['main_description', 'issues_found', 'resolution', 'notes']
                 .forEach(id => setHidden(fgOf(id), append));
@@ -661,7 +769,7 @@
         // ---------- 補拍：只把照片掛到既有紀錄 ----------
         async function submitAppend() {
             const projectId = $('project_id').value;
-            if (!APPEND_TARGET) return say('formMsg', '請先選擇要補拍的項目');
+            if (!APPEND_TARGET) return say('formMsg', '請先選好地點與工項（要補拍到哪一張進度卡）');
             if (!pendingFiles.length && !collectPhotos().length) {
                 return say('formMsg', '補拍模式至少要選一張照片（或貼一個圖片網址）');
             }
@@ -718,7 +826,6 @@
                 + '沒有新增紀錄，時間軸不變。', 'ok');
             clearForm();
             await loadEntries();
-            await loadLatestLogForItem($('item_id').value);
             await loadStructureOptions($('project_id').value);
         }
 
@@ -727,22 +834,34 @@
             const projectId = $('project_id').value;
             const logDate = $('log_date').value;
             const nodeId = $('node_id').value;
-            const itemId = $('item_id').value;
+            const workType = $('work_type') ? $('work_type').value.trim() : '';
             const markComplete = !!$('mark_complete').checked;
             if (!projectId) return say('formMsg', '請選擇所屬專案');
             if (!logDate) return say('formMsg', '請選擇日期');
             if (!nodeId) return say('formMsg', '請選擇地點（地點只能從後台建立過的節點挑選）');
 
-            // 進度以「項目」為準：這筆紀錄的狀態 = 送出當下該項目的狀態
-            // （勾了「這次拍攝後已完成」就記為已完成）
-            const itemRow = itemId ? ITEMS_BY_ID.get(itemId) : null;
-            const statusForLog = itemRow ? (markComplete ? 'completed' : (itemRow.status || null)) : null;
+            $('submitBtn').disabled = true;
+
+            // 進度以「地點 × 工項」那張進度卡為準：這筆紀錄的狀態 = 送出當下那張卡的狀態。
+            // 工項留空＝只是記現場狀況，不歸屬任何進度卡。
+            // 打了新的工項 → 這裡自動建立那張卡（不必先回後台建立）。
+            let itemRow = null;
+            if (workType) {
+                try {
+                    itemRow = await ensureItemFor(projectId, nodeId, workType);
+                } catch (err) {
+                    $('submitBtn').disabled = false;
+                    return say('formMsg', err.message);
+                }
+            }
+            const itemId = itemRow ? itemRow.id : null;
+            const statusForLog = itemRow ? (markComplete ? 'completed' : (itemRow.status || 'in_progress')) : null;
 
             const payload = {
                 project_id: projectId,
                 log_date: logDate,
                 node_id: nodeId,
-                item_id: itemId || null,
+                item_id: itemId,
                 // location 存「當下的完整路徑」：日後節點改名或刪除，這行字仍是歷史痕跡
                 location: NODE_PATHS.get(nodeId) || null,
                 main_description: $('main_description').value.trim() || null,
@@ -756,8 +875,6 @@
             // 留空時「不要送這個欄位」，讓資料庫套用預設值。送 null 會違反 NOT NULL。
             const logTime = $('log_time').value;
             if (logTime) payload.log_time = logTime;
-
-            $('submitBtn').disabled = true;
 
             // 先上傳檔案照片：失敗就停住，不留半筆紀錄
             let filePhotos = [];
@@ -806,29 +923,34 @@
                 }
             }
 
-            // 勾了「這次拍攝後已完成」→ 順手把項目結案（進度以項目為準）
+            // 勾了「這次拍攝後已完成」→ 順手把進度卡結案
             let extra = '', hadErr = false;
             if (itemId && markComplete) {
                 const { error: ue } = await supabase.from('items')
                     .update({ status: 'completed' }).eq('id', itemId);
-                if (ue) { extra = `\n⚠️ 紀錄已存，但項目狀態更新失敗：${ue.message}`; hadErr = true; }
-                else extra = '，項目已標記為「已完成」';
+                if (ue) { extra = `\n⚠️ 紀錄已存，但進度卡狀態更新失敗：${ue.message}`; hadErr = true; }
+                else extra = '，這個工項已標記為「已完成」';
             }
 
+            const where = NODE_PATHS.get(nodeId) || '';
+            const pair = workType ? `（${where ? where + ' · ' : ''}${workType}）` : '';
+
             $('submitBtn').disabled = false;
-            say('formMsg', `✅ 已新增 1 筆紀錄${photos.length ? ` 與 ${photos.length} 張照片` : ''}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
+            say('formMsg', `✅ 已新增 1 筆紀錄${photos.length ? ` 與 ${photos.length} 張照片` : ''}${pair}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
             clearForm();
             await loadEntries();
-            await loadStructureOptions($('project_id').value);   // 更新項目的狀態標籤
+            await loadStructureOptions($('project_id').value);   // 更新工項清單與進度卡狀態
         }
 
         function clearForm() {
             ['main_description', 'issues_found', 'resolution', 'notes'].forEach(id => {
                 if ($(id)) $(id).value = '';
             });
-            ['log_time', 'item_id', 'node_id'].forEach(id => {
+            // 工項清空（下一個通常換工項）；地點刻意保留 —— 同一個空間常要連續記好幾項
+            ['log_time', 'work_type'].forEach(id => {
                 if ($(id)) $(id).value = '';
             });
+            if ($('workTypePick')) $('workTypePick').value = '';
             if ($('mark_complete')) $('mark_complete').checked = false;
             syncCompleteCheckbox();
             $('photos').innerHTML = '';
@@ -843,13 +965,17 @@
         let editingEntryId = null;   // 正在編輯哪一筆（null = 沒在編輯）
         let editStruct = null;       // 該筆所屬專案的結構（地點/項目下拉用）
         const statusLabel = { completed: '已完成', in_progress: '進行中', paused: '暫停' };
+        // 編輯表單裡「追加照片」的暫存 —— renderEntries() 會整個重繪，所以狀態放在外面
+        let EDIT_FILES = [];         // [{ file, desc }]
+        let EDIT_URLS = [];          // [{ url, desc }]
+        let savingEdit = false;
 
         async function loadEntries() {
             const { data, error } = await supabase
                 .from('project_logs')
                 .select('id, log_date, log_time, location, main_description, progress_status, '
                        + 'issues_found, resolution, notes, project_id, item_id, node_id, '
-                       + 'log_photos(id, photo_url, photo_description, sort_order), items(title)')
+                       + 'log_photos(id, photo_url, photo_description, sort_order), items(title, work_type, status)')
                 .order('log_date', { ascending: false })
                 .limit(20);
 
@@ -869,8 +995,10 @@
             }
             box.innerHTML = entryList.map(e => {
                 const photo = (e.log_photos && e.log_photos[0]) || {};
-                const itemTitle = (e.items && e.items.title) || '';
+                const itemTitle = e.items ? workTypeOf(e.items) : '';
                 const metaBits = [itemTitle, statusLabel[e.progress_status] || ''].filter(Boolean);
+                // 「已完成」看的是**進度卡現在的狀態**（items.status 是唯一真相）
+                const isDone = !!(e.items && e.items.status === 'completed');
                 return `
                 <div class="entry">
                     <img src="${esc(photo.photo_url || '')}" alt="" onerror="this.style.visibility='hidden'">
@@ -881,6 +1009,7 @@
                         ${editingEntryId === e.id ? renderEditForm(e) : ''}
                     </div>
                     <div class="entry-actions">
+                        ${isDone ? '<span class="badge done">已完成</span>' : ''}
                         <button class="ghost small" data-edit="${esc(e.id)}">編輯</button>
                         <button class="danger small" data-del="${esc(e.id)}">刪除</button>
                     </div>
@@ -894,7 +1023,12 @@
                 btn.onclick = () => startEditEntry(btn.getAttribute('data-edit'));
             });
             const cancel = box.querySelector('[data-cancel-edit]');
-            if (cancel) cancel.onclick = () => { editingEntryId = null; renderEntries(); };
+            if (cancel) cancel.onclick = () => {
+                editingEntryId = null;
+                EDIT_FILES = [];
+                EDIT_URLS = [];
+                renderEntries();
+            };
             const save = box.querySelector('[data-save-edit]');
             if (save) save.onclick = () => saveEntryEdit(save.getAttribute('data-save-edit'));
             box.querySelectorAll('[data-del-photo]').forEach(btn => {
@@ -904,9 +1038,16 @@
                     btn.getAttribute('data-photo-url')
                 );
             });
+            // 編輯表單的工項：從清單挑 → 填進文字欄（真正送出的是文字欄）
+            const wtPick = box.querySelector('#ee-wt-pick');
+            if (wtPick) wtPick.onchange = () => {
+                const inp = box.querySelector('#ee-worktype');
+                if (inp && wtPick.value) inp.value = wtPick.value;
+            };
+            if (editingEntryId) bindEditPhotoUI(box);
         }
 
-        // 編輯表單：地點與項目一樣用下拉（跟新增時同一套選項，避免打字不一致）
+        // 編輯表單：地點與工項用下拉（跟新增時同一套選項，避免打字不一致）
         function renderEditForm(e) {
             const s = editStruct;
             const nodeOpts = ['<option value="">（未指定）</option>'].concat(
@@ -914,11 +1055,13 @@
                     `<option value="${esc(n.id)}"${n.id === e.node_id ? ' selected' : ''}>`
                     + `${esc(s.nodePaths.get(n.id))}</option>`) : []
             ).join('');
-            const itemOpts = ['<option value="">（未指定）</option>'].concat(
-                s ? s.items.map(i =>
-                    `<option value="${esc(i.id)}"${i.id === e.item_id ? ' selected' : ''}>`
-                    + `${esc(i.title)}</option>`) : []
-            ).join('');
+            // 工項：這筆紀錄目前屬於哪張進度卡（＝文字欄的值）；
+            // 清單是整個專案用過的工項（跨樓層共用一份）
+            const curWT = (() => {
+                const it = (s && e.item_id) ? (s.items || []).find(i => i.id === e.item_id) : null;
+                return it ? workTypeOf(it) : '';
+            })();
+            const wtList = uniqSorted(((s && s.items) || []).map(workTypeOf));
             const photos = (e.log_photos || []).slice()
                 .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
             const photoHtml = photos.length
@@ -939,8 +1082,12 @@
                 <div class="ef-grid">
                     <div><label>日期</label><input type="date" id="ee-date" value="${esc(e.log_date)}"></div>
                     <div><label>時間</label><input type="time" id="ee-time" value="${esc(t)}"></div>
-                    <div><label>項目</label><select id="ee-item">${itemOpts}</select></div>
                     <div><label>地點</label><select id="ee-node">${nodeOpts}</select></div>
+                    <div><label>工項</label>
+                        <select id="ee-wt-pick"><option value="">✏️ 自己輸入 / 從清單挑…</option>
+                        ${wtList.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}</select>
+                        <input type="text" id="ee-worktype" value="${esc(curWT)}"
+                               placeholder="例：主牆塗漿（留空＝不歸屬任何工項）"></div>
                     <div class="full"><label>主描述</label>
                         <textarea id="ee-desc" rows="2">${esc(e.main_description || '')}</textarea></div>
                     <div class="full"><label>發現問題</label>
@@ -950,8 +1097,28 @@
                     <div class="full"><label>備註</label>
                         <textarea id="ee-notes" rows="2">${esc(e.notes || '')}</textarea></div>
                 </div>
+                <div class="sub-label">進度</div>
+                <label class="check-line" style="font-size:13px">
+                    <input type="checkbox" id="ee-complete"${(e.items && e.items.status === 'completed') ? ' checked' : ''}>
+                    <span>這個工項<strong>已完成</strong></span>
+                </label>
+                <div class="hint">${curWT
+                    ? '完成狀態記在「地點 × 工項」的進度卡上，後台與公開頁面都會跟著更新。'
+                    : '要能打勾，請先在上面填「工項」——完成狀態是記在進度卡上。'}</div>
+
                 <div class="sub-label">照片（${photos.length} 張）</div>
                 ${photoHtml}
+
+                <div class="sub-label">＋ 追加照片到這筆紀錄</div>
+                <div class="add-photo-bar">
+                    <button type="button" class="ghost small" id="ee-pick-photos">📷 選擇照片</button>
+                    <button type="button" class="ghost small" id="ee-add-photo-url">＋ 新增一張網址</button>
+                </div>
+                <input type="file" id="ee-photo-files" accept="image/*" multiple class="hidden">
+                <div id="ee-photo-preview"></div>
+                <div id="ee-photo-urls"></div>
+                <div class="hint">按「儲存」時才上傳；新照片會接在既有照片<strong>後面</strong>，不蓋掉原本的。</div>
+
                 <div class="edit-actions">
                     <button data-save-edit="${esc(e.id)}">儲存</button>
                     <button class="ghost" data-cancel-edit="${esc(e.id)}">取消</button>
@@ -959,10 +1126,90 @@
             </div>`;
         }
 
+        // ---------- 編輯表單：追加照片（檔案 + 網址）----------
+        function renderEditPhotoPreview() {
+            const box = $('ee-photo-preview');
+            if (!box) return;
+            box.innerHTML = '';
+            EDIT_FILES.forEach((item, i) => {
+                const div = document.createElement('div');
+                div.className = 'ee-photo-row';
+                const thumb = URL.createObjectURL(item.file);
+                div.innerHTML = `
+                    <img src="${thumb}" alt="">
+                    <input type="text" class="p-desc" placeholder="照片描述（選填）">
+                    <button type="button" class="ghost rm">刪除</button>`;
+                const inp = div.querySelector('.p-desc');
+                inp.value = item.desc || '';
+                inp.oninput = ev => { EDIT_FILES[i].desc = ev.target.value; };
+                div.querySelector('.rm').onclick = () => {
+                    URL.revokeObjectURL(thumb);
+                    EDIT_FILES.splice(i, 1);
+                    renderEditPhotoPreview();
+                };
+                box.appendChild(div);
+            });
+        }
+
+        function renderEditUrlRows() {
+            const wrap = $('ee-photo-urls');
+            if (!wrap) return;
+            wrap.innerHTML = '';
+            EDIT_URLS.forEach((row, i) => {
+                const div = document.createElement('div');
+                div.className = 'ee-photo-row';
+                div.innerHTML = `
+                    <input type="url" class="p-url" placeholder="https://…/photo.jpg">
+                    <input type="text" class="p-desc" placeholder="照片描述">
+                    <button type="button" class="ghost rm">刪除</button>`;
+                const u = div.querySelector('.p-url'), d = div.querySelector('.p-desc');
+                u.value = row.url || ''; d.value = row.desc || '';
+                u.oninput = ev => { EDIT_URLS[i].url = ev.target.value; };
+                d.oninput = ev => { EDIT_URLS[i].desc = ev.target.value; };
+                div.querySelector('.rm').onclick = () => { EDIT_URLS.splice(i, 1); renderEditUrlRows(); };
+                wrap.appendChild(div);
+            });
+        }
+
+        const collectEditPhotoUrls = () => EDIT_URLS
+            .map(r => ({
+                photo_url: String(r.url || '').trim(),
+                photo_description: String(r.desc || '').trim() || null
+            }))
+            .filter(p => p.photo_url);
+
+        // 每次重繪編輯表單都要重新接（HTML 是字串產生的）
+        function bindEditPhotoUI(box) {
+            const pick = box.querySelector('#ee-pick-photos');
+            const fileInput = box.querySelector('#ee-photo-files');
+            if (pick && fileInput) {
+                pick.onclick = () => fileInput.click();
+                fileInput.onchange = ev => {
+                    const files = [...(ev.target.files || [])];
+                    let added = 0;
+                    for (const f of files) {
+                        if (!String(f.type || '').startsWith('image/')) continue;
+                        EDIT_FILES.push({ file: f, desc: '' });
+                        added++;
+                    }
+                    ev.target.value = '';   // 允許重選同一個檔案
+                    if (!added && files.length) say('listMsg', '只能上傳圖片檔', 'error');
+                    renderEditPhotoPreview();
+                };
+            }
+            const addUrl = box.querySelector('#ee-add-photo-url');
+            if (addUrl) addUrl.onclick = () => { EDIT_URLS.push({ url: '', desc: '' }); renderEditUrlRows(); };
+            renderEditPhotoPreview();
+            renderEditUrlRows();
+        }
+
         async function startEditEntry(id) {
             const e = entryList.find(x => x.id === id);
             if (!e) return;
             editStruct = null;
+            EDIT_FILES = [];
+            EDIT_URLS = [];
+            savingEdit = false;
             try {
                 editStruct = await fetchStructure(e.project_id);
             } catch (err) {
@@ -977,17 +1224,61 @@
         async function saveEntryEdit(id) {
             const e = entryList.find(x => x.id === id);
             if (!e) return;
+            if (savingEdit) return;   // 防連點
+
             const nodeId = $('ee-node').value || null;
+            const wt = $('ee-worktype') ? $('ee-worktype').value.trim() : '';
+            const complete = !!($('ee-complete') && $('ee-complete').checked);
+            const saveBtn = $('entries') && $('entries').querySelector
+                ? $('entries').querySelector('[data-save-edit]') : null;
+
+            if (complete && !wt) {
+                return say('listMsg',
+                    '要標記「已完成」，請先填工項 —— 完成狀態是記在「地點 × 工項」的進度卡上。', 'error');
+            }
+
+            // 工項 → 對應到「該地點 × 該工項」的進度卡（沒有就建一張）
+            let itemId = null;
+            if (wt) {
+                if (!nodeId) return say('listMsg', '要指定工項，請先選地點（進度卡是「地點 × 工項」）。');
+                try {
+                    const row = await ensureItemFor(e.project_id, nodeId, wt);
+                    itemId = row ? row.id : null;
+                } catch (err) {
+                    return say('listMsg', err.message);
+                }
+            }
+
+            savingEdit = true;
+            if (saveBtn) saveBtn.disabled = true;
+            const unlock = () => { savingEdit = false; if (saveBtn) saveBtn.disabled = false; };
+
+            // ① 先上傳新選的照片檔（失敗就停住，不改動紀錄本身）
+            let newPhotos = [];
+            if (EDIT_FILES.length) {
+                try {
+                    newPhotos = await uploadFileList(EDIT_FILES, e.project_id, (done, total) => {
+                        say('listMsg', `上傳新照片中… ${done}/${total}`, 'info');
+                    });
+                } catch (err) {
+                    unlock();
+                    return say('listMsg', '照片上傳失敗：' + err.message, 'error');
+                }
+            }
+            newPhotos = newPhotos.concat(collectEditPhotoUrls());
+
             const payload = {
                 log_date: $('ee-date').value || e.log_date,
                 node_id: nodeId,
-                item_id: $('ee-item').value || null,
+                item_id: itemId,
                 // location 存「當下的完整路徑」：節點日後改名或刪除，這行字仍是歷史痕跡
                 location: nodeId && editStruct ? (editStruct.nodePaths.get(nodeId) || null) : null,
                 main_description: valOrNull('ee-desc'),
                 issues_found: valOrNull('ee-issues'),
                 resolution: valOrNull('ee-resolution'),
-                notes: valOrNull('ee-notes')
+                notes: valOrNull('ee-notes'),
+                // 進度快照跟著進度卡的完成狀態走
+                progress_status: itemId ? (complete ? 'completed' : 'in_progress') : null
             };
             // log_time 是 NOT NULL：留空時「不要送這個欄位」，保留原本的值
             const t = $('ee-time').value;
@@ -995,16 +1286,45 @@
 
             const { error } = await supabase.from('project_logs').update(payload).eq('id', id);
             if (error) {
+                unlock();
                 let extra = '';
                 if (error.code === '42501' || /row-level security/i.test(error.message || '')) {
                     extra = '\n\n→ 資料庫權限擋下：只有 admin 或該專案的 owner / editor 能修改紀錄。';
                 }
                 return say('listMsg', '儲存失敗：' + error.message + extra);
             }
+
+            // ② 新照片接在既有照片「後面」（維持 起點 → 最新 的順序）
+            let photoNote = '';
+            if (newPhotos.length) {
+                const { count } = await supabase.from('log_photos')
+                    .select('id', { count: 'exact', head: true }).eq('log_id', id);
+                const base = count || 0;
+                const { error: pErr } = await supabase.from('log_photos')
+                    .insert(newPhotos.map((p, i) => ({ ...p, log_id: id, sort_order: base + i })));
+                photoNote = pErr
+                    ? `（但 ${newPhotos.length} 張新照片寫入失敗：${pErr.message}）`
+                    : `，並追加 ${newPhotos.length} 張照片`;
+            }
+
+            // ③ 進度卡的完成狀態（items.status 是唯一真相，公開頁面也讀這個）
+            let statusNote = '';
+            if (itemId) {
+                const { error: uErr } = await supabase.from('items')
+                    .update({ status: complete ? 'completed' : 'in_progress' }).eq('id', itemId);
+                if (uErr) statusNote = `（但進度卡狀態更新失敗：${uErr.message}）`;
+                else statusNote = complete ? '，這個工項已標記為「已完成」' : '，這個工項標記為「進行中」';
+            }
+
+            unlock();
             editingEntryId = null;
-            say('listMsg', '✅ 紀錄已更新。公開頁面重新整理即可看到。', 'ok');
+            EDIT_FILES = [];
+            EDIT_URLS = [];
+            const bad = photoNote.includes('失敗') || statusNote.includes('失敗');
+            say('listMsg', `✅ 紀錄已更新${photoNote}${statusNote}。公開頁面重新整理即可看到。`,
+                bad ? 'error' : 'ok');
             await loadEntries();
-            await loadLatestLogForItem($('item_id').value);
+            await loadStructureOptions($('project_id').value);
         }
 
         // 刪除單張照片（Storage 檔案 + log_photos 那一列）
@@ -1096,20 +1416,22 @@
         $('modeNew').onclick = () => setMode('new');
         $('modeAppend').onclick = () => setMode('append');
 
-        // 換專案 → 重載該專案的節點與項目，並清掉上一個專案的「最新紀錄」面板
+        // 換專案 → 重載該專案的地點與工項，並清掉上一個專案的「最新紀錄」面板
         $('project_id').addEventListener('change', async () => {
+            $('node_id').value = '';
+            if ($('work_type')) $('work_type').value = '';
             await loadStructureOptions($('project_id').value);
-            await loadLatestLogForItem('');   // 隱藏面板、回到「新的進度更新」模式
         });
-        // 選了項目 → 帶出它所在的節點（地點）、顯示最新紀錄與模式切換
-        $('item_id').addEventListener('change', async () => {
-            const row = ITEMS_BY_ID.get($('item_id').value);
-            if (row && row.node_id && NODE_PATHS.has(row.node_id)) {
-                $('node_id').value = row.node_id;
-            }
-            syncCompleteCheckbox();
-            await loadLatestLogForItem($('item_id').value);
+        // 地點或工項改變 → 重新對應到那張進度卡（顯示最新紀錄 / 補拍目標）
+        $('node_id').addEventListener('change', () => refreshPair());
+        $('workTypePick').addEventListener('change', () => {
+            const v = $('workTypePick').value;
+            if (v && $('work_type')) $('work_type').value = v;   // 從清單挑 → 填進文字欄
+            $('workTypePick').value = '';                        // 下拉本身不留值（單一來源＝文字欄）
+            refreshPair();
         });
+        // 文字欄是唯一來源：直接打字也要即時更新面板
+        if ($('work_type')) $('work_type').addEventListener('input', () => refreshPair());
 
         // 拍照 / 選檔 / 拖放
         $('dropZone').onclick = () => $('photoFiles').click();
