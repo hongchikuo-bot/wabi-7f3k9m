@@ -75,6 +75,7 @@
             gap: 10px;
         }
         .edit-block label { font-size: 12px; margin-bottom: 3px; }
+        .edit-block .ee-taken-label { display: block; margin-top: 8px; font-size: 12px; }
         .edit-block input, .edit-block select, .edit-block textarea {
             font-size: 13px; padding: 7px 8px;
         }
@@ -94,6 +95,11 @@
             word-break: break-word; line-height: 1.35;
         }
         .photo-item button { width: 100%; padding: 4px 0; font-size: 11px; }
+        .photo-item input[type=date] {
+            width: 100%; font-size: 11px; padding: 2px 3px; margin-top: 4px;
+            box-sizing: border-box;
+        }
+        .photo-item .taken-warn { font-size: 10px; color: #8b2e2e; margin-top: 2px; }
         .sub-label { font-size: 12px; color: var(--color-accent); margin-top: 12px; }
 
         /* 該項目的最新紀錄 + 模式切換 */
@@ -236,7 +242,13 @@
 
             <!-- 只有補拍模式才出現 -->
             <div class="form-group hidden" id="appendNoteWrap">
-                <label>補充說明（選填）</label>
+                <label>這批照片的<strong>拍攝日期</strong></label>
+                <input type="date" id="append_photo_date">
+                <div class="hint">
+                    預設＝這筆紀錄的日期。補<strong>舊照片</strong>時改成拍攝當天 ——
+                    系統會依這個日期把照片排到正確的位置（不是接在最後面）。
+                </div>
+                <label style="margin-top:12px;display:block">補充說明（選填）</label>
                 <textarea id="append_note" rows="2"
                     placeholder="例：補拍同角度的收邊細節"></textarea>
                 <div class="hint">這段文字會<strong>附加</strong>到那筆紀錄的備註，不會蓋掉原本的內容。</div>
@@ -356,6 +368,12 @@
             $('listCard').classList.remove('hidden');
             const { data: { user } } = await supabase.auth.getUser();
             $('whoami').textContent = (user && user.email) || '';
+            await probeTakenAt();
+            if (!HAS_TAKEN_AT) {
+                say('formMsg', 'ℹ️ 照片的「拍攝日期」功能還沒啟用：資料庫缺 log_photos.taken_at 欄位。\n'
+                    + '其他功能都正常。跑一次 private-docs/sql/add-log-photos-taken-at.sql，'
+                    + '重新整理後就會自動啟用。', 'info');
+            }
             await loadProjects();
             await loadEntries();
         }
@@ -663,6 +681,58 @@
                 .filter(p => p.photo_url);
         }
 
+        // ---------- 照片的「拍攝日期」（taken_at）----------
+        // 需要先在資料庫加一個欄位（見 private-docs/sql/add-log-photos-taken-at.sql）。
+        // 還沒加之前整支程式照常運作，只是不記日期 —— 所以先偵測，再決定要不要送這個欄位。
+        let HAS_TAKEN_AT = false;
+
+        async function probeTakenAt() {
+            // 有任何錯誤都當成「還沒有這個欄位」（保守方向：不送就不會壞）
+            const { error } = await supabase.from('log_photos').select('taken_at').limit(0);
+            HAS_TAKEN_AT = !error;
+            return HAS_TAKEN_AT;
+        }
+
+        // 欄位還不存在時，把 taken_at 從 payload 拿掉
+        const stripTa = rows => HAS_TAKEN_AT ? rows : rows.map(r => {
+            const c = { ...r }; delete c.taken_at; return c;
+        });
+
+        // 依拍攝日期重算某筆紀錄所有照片的 sort_order。
+        // 沒填日期的照片＝視為「紀錄當天拍的」，排在已填日期的後面。
+        // ⚠️ sort_order 是整數欄，不能用小數插隊 → 一定要重排。
+        // ⚠️ 缺 UPDATE 政策時 update 不會報錯、只回 0 列 → 必須自己比對筆數。
+        async function reorderLogPhotos(logId, logDate) {
+            if (!HAS_TAKEN_AT) return { total: 0, changed: 0, failed: 0 };
+            const { data, error } = await supabase.from('log_photos')
+                .select('id, sort_order, taken_at').eq('log_id', logId);
+            if (error) throw new Error('讀取照片順序失敗：' + error.message);
+            const fallback = logDate || '9999-12-31';
+            const rows = (data || []).slice().sort((a, b) => {
+                const ka = a.taken_at || fallback, kb = b.taken_at || fallback;
+                if (ka !== kb) return ka < kb ? -1 : 1;
+                return (a.sort_order || 0) - (b.sort_order || 0);
+            });
+            let changed = 0, failed = 0;
+            for (let i = 0; i < rows.length; i++) {
+                if ((rows[i].sort_order || 0) === i) continue;   // 沒變就不打 API
+                const { data: upd, error: uErr } = await supabase.from('log_photos')
+                    .update({ sort_order: i }).eq('id', rows[i].id).select('id');
+                if (uErr || !upd || !upd.length) failed++; else changed++;
+            }
+            return { total: rows.length, changed, failed };
+        }
+
+        // 重排結果的說明文字（給訊息用）
+        function reorderNote(r, label = '照片順序') {
+            if (!r || !r.total) return '';
+            if (r.failed) {
+                return `\n⚠️ ${label}沒有完全寫入（${r.failed}/${r.total} 筆失敗）——`
+                     + ' 可能是 log_photos 缺少 UPDATE 權限，照片會留在原本的位置。';
+            }
+            return r.changed ? `，並依拍攝日期重排了 ${r.changed} 張` : '';
+        }
+
         // ---------- 該項目的最新紀錄 + 兩種模式（新進度 / 補拍）----------
         // 同一個工作事項有兩種情境，以前分不出來、都會變成兩筆紀錄：
         //   ① 新的進度更新 → 建立新紀錄（時間軸多一個點，形成前後對照）
@@ -678,6 +748,8 @@
         async function loadLatestLogForItem(itemId, workType, nodeId) {
             APPEND_TARGET = null;
             APPEND_PHOTO_COUNT = 0;
+            // 補拍的照片日期預設＝那筆紀錄的日期（換目標時要跟著換）
+            if ($('append_photo_date')) $('append_photo_date').value = '';
             const wt = String(workType || '').trim();
             const where = (nodeId && NODE_PATHS.get(nodeId)) || '';
             if (!wt) {
@@ -729,6 +801,7 @@
 
             APPEND_TARGET = latest;
             APPEND_PHOTO_COUNT = (latest.log_photos || []).length;
+            if ($('append_photo_date')) $('append_photo_date').value = latest.log_date || '';
             $('modeAppend').disabled = false;
             const t = latest.log_time ? ' ' + String(latest.log_time).slice(0, 5) : '';
             $('latestPanel').innerHTML = `<div class="latest-box">
@@ -786,9 +859,13 @@
                     return say('formMsg', '照片上傳失敗：' + err.message);
                 }
             }
-            const photos = [...filePhotos, ...collectPhotos()];
+            // 這批照片的拍攝日期：預設＝目標那筆紀錄的日期；補舊照片時自己改成拍攝當天
+            const rawDate = $('append_photo_date') ? $('append_photo_date').value : '';
+            const photoDate = rawDate || APPEND_TARGET.log_date || null;
+            const photos = [...filePhotos, ...collectPhotos()]
+                .map(p => ({ ...p, taken_at: photoDate }));
 
-            // sort_order 接在既有照片後面，維持「起點 → 最新」的順序
+            // 先接在最後（維持 起點 → 最新）；補舊照片時下面會依拍攝日期重排
             const { count } = await supabase
                 .from('log_photos')
                 .select('id', { count: 'exact', head: true })
@@ -796,7 +873,7 @@
             const base = count || 0;
 
             const { error } = await supabase.from('log_photos').insert(
-                photos.map((p, i) => ({ ...p, log_id: APPEND_TARGET.id, sort_order: base + i }))
+                stripTa(photos.map((p, i) => ({ ...p, log_id: APPEND_TARGET.id, sort_order: base + i })))
             );
             if (error) {
                 $('submitBtn').disabled = false;
@@ -820,10 +897,19 @@
             if ($('append_note')) $('append_note').value = '';
 
             const targetDate = APPEND_TARGET.log_date;
+            // 依拍攝日期重排（補了比紀錄更早的照片時才會真的動到順序）
+            let orderNote = '';
+            try {
+                orderNote = reorderNote(await reorderLogPhotos(APPEND_TARGET.id, targetDate));
+            } catch (err) {
+                orderNote = `\n⚠️ 照片順序重排失敗：${err.message}`;
+            }
+
             $('submitBtn').disabled = false;
             say('formMsg',
-                `✅ 已補上 ${photos.length} 張照片到 ${targetDate} 的那筆紀錄${noteNote}。`
-                + '沒有新增紀錄，時間軸不變。', 'ok');
+                `✅ 已補上 ${photos.length} 張照片到 ${targetDate} 的那筆紀錄`
+                + `（拍攝日期：${photoDate || '未填'}）${noteNote}${orderNote}。`
+                + '沒有新增紀錄，時間軸不變。', orderNote.includes('⚠️') ? 'error' : 'ok');
             clearForm();
             await loadEntries();
             await loadStructureOptions($('project_id').value);
@@ -895,7 +981,10 @@
                 }
             }
 
-            const photos = [...filePhotos, ...collectPhotos()];
+            // 新紀錄的照片：拍攝日期＝紀錄日期，並明確定 sort_order
+            // （sort_order 是公開頁「第一張照片」的依據，不能靠資料庫的回傳順序）
+            const photos = [...filePhotos, ...collectPhotos()]
+                .map(p => ({ ...p, taken_at: logDate }));
             say('formMsg', '寫入紀錄中…', 'info');
 
             const { data: log, error } = await supabase
@@ -914,7 +1003,7 @@
 
             if (photos.length) {
                 const { error: pErr } = await supabase.from('log_photos')
-                    .insert(photos.map(p => ({ ...p, log_id: log.id })));
+                    .insert(stripTa(photos.map((p, i) => ({ ...p, log_id: log.id, sort_order: i }))));
                 if (pErr) {
                     $('submitBtn').disabled = false;
                     return say('formMsg',
@@ -951,6 +1040,7 @@
                 if ($(id)) $(id).value = '';
             });
             if ($('workTypePick')) $('workTypePick').value = '';
+            if ($('append_photo_date')) $('append_photo_date').value = '';
             if ($('mark_complete')) $('mark_complete').checked = false;
             syncCompleteCheckbox();
             $('photos').innerHTML = '';
@@ -975,7 +1065,7 @@
                 .from('project_logs')
                 .select('id, log_date, log_time, location, main_description, progress_status, '
                        + 'issues_found, resolution, notes, project_id, item_id, node_id, '
-                       + 'log_photos(id, photo_url, photo_description, sort_order), items(title, work_type, status)')
+                       + 'log_photos(id, photo_url, photo_description, sort_order, taken_at), items(title, work_type, status)')
                 .order('log_date', { ascending: false })
                 .limit(20);
 
@@ -1065,9 +1155,11 @@
             const photos = (e.log_photos || []).slice()
                 .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
             const photoHtml = photos.length
-                ? `<div class="photo-grid">${photos.map(p => `
+                ? `<div class="photo-grid" id="ee-photo-grid">${photos.map(p => `
                     <div class="photo-item">
                         <img src="${esc(p.photo_url)}" alt="" onerror="this.style.visibility='hidden'">
+                        <input type="date" data-photo-taken="${esc(p.id)}" value="${esc(p.taken_at || '')}"
+                               title="這張照片的拍攝日期（留空＝這筆紀錄的日期）">
                         <div class="pdesc">${esc(p.photo_description || '（無描述）')}</div>
                         <button class="danger small"
                             data-del-photo="${esc(p.id)}"
@@ -1110,6 +1202,10 @@
                 ${photoHtml}
 
                 <div class="sub-label">＋ 追加照片到這筆紀錄</div>
+                <label class="ee-taken-label">這批照片的<strong>拍攝日期</strong></label>
+                <input type="date" id="ee-photo-date" value="${esc(e.log_date || '')}">
+                <div class="hint">預設＝這筆紀錄的日期（${esc(e.log_date || '')}）。
+                    補<strong>舊照片</strong>時改成拍攝當天 —— 系統會依拍攝日期把照片排到正確的位置。</div>
                 <div class="add-photo-bar">
                     <button type="button" class="ghost small" id="ee-pick-photos">📷 選擇照片</button>
                     <button type="button" class="ghost small" id="ee-add-photo-url">＋ 新增一張網址</button>
@@ -1253,6 +1349,9 @@
             if (saveBtn) saveBtn.disabled = true;
             const unlock = () => { savingEdit = false; if (saveBtn) saveBtn.disabled = false; };
 
+            // 這批新照片的拍攝日期（預設＝這筆紀錄的日期；補舊照片時改成拍攝當天）
+            const batchDate = ($('ee-photo-date') && $('ee-photo-date').value) || e.log_date || null;
+
             // ① 先上傳新選的照片檔（失敗就停住，不改動紀錄本身）
             let newPhotos = [];
             if (EDIT_FILES.length) {
@@ -1265,7 +1364,8 @@
                     return say('listMsg', '照片上傳失敗：' + err.message, 'error');
                 }
             }
-            newPhotos = newPhotos.concat(collectEditPhotoUrls());
+            newPhotos = newPhotos.concat(collectEditPhotoUrls())
+                .map(p => ({ ...p, taken_at: batchDate }));
 
             const payload = {
                 log_date: $('ee-date').value || e.log_date,
@@ -1294,17 +1394,46 @@
                 return say('listMsg', '儲存失敗：' + error.message + extra);
             }
 
-            // ② 新照片接在既有照片「後面」（維持 起點 → 最新 的順序）
+            // ② 追加新照片（先接在最後，下面再依拍攝日期重排）
             let photoNote = '';
             if (newPhotos.length) {
                 const { count } = await supabase.from('log_photos')
                     .select('id', { count: 'exact', head: true }).eq('log_id', id);
                 const base = count || 0;
                 const { error: pErr } = await supabase.from('log_photos')
-                    .insert(newPhotos.map((p, i) => ({ ...p, log_id: id, sort_order: base + i })));
+                    .insert(stripTa(newPhotos.map((p, i) => ({ ...p, log_id: id, sort_order: base + i }))));
                 photoNote = pErr
                     ? `（但 ${newPhotos.length} 張新照片寫入失敗：${pErr.message}）`
-                    : `，並追加 ${newPhotos.length} 張照片`;
+                    : `，追加 ${newPhotos.length} 張（拍攝日期 ${batchDate || '未填'}）`;
+            }
+
+            // ②-b 既有照片的拍攝日期若有改動 → 逐張更新
+            // ⚠️ 用 data-photo-taken 而不是動態 id（動態 id 檢查工具會誤判「取用到不存在的 id」）
+            let dateNote = '';
+            if (HAS_TAKEN_AT) {
+                let ok = 0, fail = 0;
+                const inputs = document.querySelectorAll('#ee-photo-grid input[data-photo-taken]');
+                for (const el of inputs) {
+                    const photoId = el.getAttribute('data-photo-taken');
+                    const p = (e.log_photos || []).find(x => x.id === photoId);
+                    if (!p) continue;
+                    const v = String(el.value || '').trim() || null;
+                    if (v === (p.taken_at || null)) continue;   // 沒改就不打 API
+                    const { data: upd, error: dErr } = await supabase.from('log_photos')
+                        .update({ taken_at: v }).eq('id', p.id).select('id');
+                    // 缺 UPDATE 政策時不會報錯、只回 0 列 → 要自己比對
+                    if (dErr || !upd || !upd.length) fail++; else ok++;
+                }
+                if (fail) dateNote = `\n⚠️ 有 ${fail} 張照片的拍攝日期沒寫進去（可能缺少 UPDATE 權限）。`;
+                else if (ok) dateNote = `，改了 ${ok} 張照片的拍攝日期`;
+            }
+
+            // ②-c 依拍攝日期重排這筆紀錄的照片順序
+            let orderNote = '';
+            try {
+                orderNote = reorderNote(await reorderLogPhotos(id, payload.log_date || e.log_date));
+            } catch (err) {
+                orderNote = `\n⚠️ 照片順序重排失敗：${err.message}`;
             }
 
             // ③ 進度卡的完成狀態（items.status 是唯一真相，公開頁面也讀這個）
@@ -1320,9 +1449,10 @@
             editingEntryId = null;
             EDIT_FILES = [];
             EDIT_URLS = [];
-            const bad = photoNote.includes('失敗') || statusNote.includes('失敗');
-            say('listMsg', `✅ 紀錄已更新${photoNote}${statusNote}。公開頁面重新整理即可看到。`,
-                bad ? 'error' : 'ok');
+            const bad = [photoNote, dateNote, orderNote, statusNote]
+                .some(s => s.includes('失敗') || s.includes('⚠️'));
+            say('listMsg', `✅ 紀錄已更新${photoNote}${dateNote}${orderNote}${statusNote}。`
+                + '公開頁面重新整理即可看到（照片順序以拍攝日期為準）。', bad ? 'error' : 'ok');
             await loadEntries();
             await loadStructureOptions($('project_id').value);
         }
