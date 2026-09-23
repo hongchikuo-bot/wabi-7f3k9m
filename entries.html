@@ -330,6 +330,16 @@
                 目前登入：<strong id="whoami"></strong>
             </div>
             <div class="form-group">
+                <label>顯示名稱</label>
+                <input type="text" id="displayName" placeholder="例：王師傅">
+                <div class="hint">
+                    這個名字會出現在紀錄的「<strong>紀錄：</strong>」和公開頁上（就是你做了哪些工作）。
+                </div>
+            </div>
+            <button id="saveNameBtn" class="ghost">儲存顯示名稱</button>
+            <div id="nameMsg"></div>
+            <div style="border-top:1px solid var(--color-line);margin:18px 0 14px"></div>
+            <div class="form-group">
                 <label>新密碼（至少 6 碼）</label>
                 <input type="password" id="newPw" autocomplete="new-password">
             </div>
@@ -399,6 +409,7 @@
             $('whoami').textContent = MY_NAME
                 ? `${MY_NAME}（${(user && user.email) || ''}）`
                 : ((user && user.email) || '');
+            if ($('displayName')) $('displayName').value = MY_NAME || '';
             const missing = [];
             if (!HAS_TAKEN_AT) missing.push('照片的「拍攝日期」（缺 log_photos.taken_at）');
             if (!HAS_RECORDER) missing.push('「紀錄人」（缺 project_logs.recorder_name 與公開頁的外掛視圖）');
@@ -417,6 +428,28 @@
             $('listCard').classList.add('hidden');
             $('logoutBtn').classList.add('hidden');
             $('status').textContent = '';
+        }
+
+        // ---------- 顯示名稱（會出現在「紀錄：」和公開頁）----------
+        async function saveDisplayName() {
+            const name = ($('displayName') ? $('displayName').value : '').trim();
+            if (!name) return say('nameMsg', '請輸入顯示名稱', 'error');
+            say('nameMsg', '儲存中…', 'info');
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return say('nameMsg', '請先登入', 'error');
+            // ⚠️ 缺 UPDATE 政策時不會報錯、只回 0 列 → 一定要比對筆數
+            const { data: upd, error } = await supabase.from('profiles')
+                .update({ display_name: name }).eq('id', user.id).select('id');
+            if (error) return say('nameMsg', '儲存失敗：' + error.message, 'error');
+            if (!upd || !upd.length) {
+                return say('nameMsg',
+                    '沒寫進去 —— 你的帳號可能沒有修改自己 profile 的權限，'
+                    + '請在 SQL Editor 跑一次：\n'
+                    + `update profiles set display_name = '${name}' where id = '${user.id}';`, 'error');
+            }
+            MY_NAME = name;
+            $('whoami').textContent = `${name}（${user.email || ''}）`;
+            say('nameMsg', '✅ 已更新。之後上傳的紀錄都會標這個名字。', 'ok');
         }
 
         // ---------- 修改密碼 ----------
@@ -1777,6 +1810,7 @@
         // 一顆送出鈕，依目前模式決定是「新增紀錄」還是「補照片到既有紀錄」
         $('submitBtn').onclick = () => (CURRENT_MODE === 'append' ? submitAppend() : submitEntry());
         $('changePwBtn').onclick = changePassword;
+        $('saveNameBtn').onclick = saveDisplayName;
         $('reorderBtn').onclick = reorderAllPhotos;
         $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); showLogin(); };
 
