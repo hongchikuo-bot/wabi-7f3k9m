@@ -454,7 +454,7 @@ export function closeTimeline() {
 
 function renderTimeline(item, logs) {
   const box = $('timelineBody');
-  const stLabel = { completed: '已完成', in_progress: '進行中', paused: '暫停' };
+  const stLabel = { '': '開案', completed: '已完成', in_progress: '進行中', paused: '暫停' };
 
   if (!logs.length) {
     box.innerHTML = `<div class="empty">這個項目還沒有任何紀錄。<br><br>
@@ -464,7 +464,7 @@ function renderTimeline(item, logs) {
 
   const photoCount = logs.reduce((n, l) => n + ((l.log_photos || []).length), 0);
   const first = logs[0], last = logs[logs.length - 1];
-  const st = item ? (stLabel[item.status] || '未設定') : '—';
+  const st = item ? (stLabel[item.status] || '開案') : '—';
   const span = first.log_date === last.log_date
     ? esc(first.log_date)
     : `${esc(first.log_date)} → ${esc(last.log_date)}`;
@@ -647,11 +647,12 @@ function renderNodes() {
 
 function statusChip(status) {
   const map = {
+    '': ['開案', 'opened'],
     completed: ['已完成', 'done'],
     in_progress: ['進行中', 'doing'],
     paused: ['暫停', 'paused']
   };
-  const [label, cls] = map[status] || ['未設定', ''];
+  const [label, cls] = map[status] || ['開案', 'opened'];
   return `<span class="chip ${cls}">${label}</span>`;
 }
 
@@ -751,7 +752,7 @@ function renderProjectItems() {
     return parts.join(' / ');
   };
   const statusOptions = [
-    ['', '（未設定）'], ['in_progress', '進行中'], ['completed', '已完成'], ['paused', '暫停']
+    ['', '開案'], ['in_progress', '進行中'], ['completed', '已完成'], ['paused', '暫停']
   ];
   const payOptions = [
     ['', '（未設定）'], ['unpaid', '未付'], ['deposit_paid', '已付訂金'],
@@ -1021,7 +1022,7 @@ function dupForm(nodeName) {
   }
 
   const total = dups.reduce((n, l) => n + l.length - 1, 0);
-  const statusLabels = { completed: '已完成', in_progress: '進行中', paused: '暫停' };
+  const statusLabels = { '': '開案', completed: '已完成', in_progress: '進行中', paused: '暫停' };
 
   const blocks = dups.map((list, gi) => {
     const wt = workTypeOf(list[0]);
@@ -1523,7 +1524,7 @@ export async function changeItemStatus(itemId, status) {
   if (!(await ensureCanManage())) return;
   try {
     await project.updateItemRow(itemId, { status: status || null });
-    const labels = { '': '未設定', in_progress: '進行中', completed: '已完成', paused: '暫停' };
+    const labels = { '': '開案', in_progress: '進行中', completed: '已完成', paused: '暫停' };
     showToast('狀態已改為「' + (labels[status] || status) + '」', 'success');
     await loadStructure();
   } catch (err) {
