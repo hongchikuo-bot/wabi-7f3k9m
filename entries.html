@@ -915,7 +915,12 @@
                 }
             }
             const itemId = itemRow ? itemRow.id : null;
-            const statusForLog = itemRow ? (markComplete ? 'completed' : (itemRow.status || 'in_progress')) : null;
+            // 紀錄的狀態＝送出當下那張進度卡的狀態（快照）。
+            // ⚠️ 不可以寫 `itemRow.status || 'in_progress'` —— 開案是空字串，會被 || 當成 falsy，
+            //    於是「開案」的工項底下冒出「進行中」的紀錄，同一個工項兩種狀態，看起來像 bug。
+            const itemStatus = (itemRow && itemRow.status !== null && itemRow.status !== undefined)
+                ? itemRow.status : '';
+            const statusForLog = itemRow ? (markComplete ? 'completed' : itemStatus) : null;
 
             const payload = {
                 project_id: projectId,
