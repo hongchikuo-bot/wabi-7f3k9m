@@ -412,12 +412,10 @@
             <div id="listMsg"></div>
             <div class="list-tools">
                 <button type="button" class="ghost small" id="reorderBtn">🖼 整理照片順序</button>
-                <button type="button" class="ghost small" id="shrinkAllBtn">🗜 壓縮既有照片</button>
                 <div class="hint">
                     <strong>整理照片順序</strong>：把下面這幾筆的照片重新編號（先依拍攝日期，同一天再依上傳時間）。
                     舊紀錄（每張的順序都是 0）按一次就會排好，公開頁的第一張照片也會跟著修正。<br>
-                    <strong>壓縮既有照片</strong>：把已經上傳的大照片縮小（網址不變、紀錄不動），省儲存空間。
-                    新上傳的照片會自動壓縮，不用按。
+                    <strong>照片會自動壓縮</strong>：上傳時就縮到最長邊 2000px（印 4×6 相片仍有 330dpi），不用手動處理。
                 </div>
             </div>
             <div id="entries"></div>
@@ -509,6 +507,7 @@
             }
             await loadProjects();
             await loadEntries();
+            await offerShrinkOnce();   // 舊的大照片：只問一次要不要壓縮
         }
 
         function showLogin() {
@@ -790,10 +789,11 @@
         }
 
         // ---------- 上傳前壓縮（紀錄用不需要原檔；手機照片動輒 3~8MB）----------
-        // 最長邊 1600px、JPEG 品質 0.82 → 通常 3~8MB 變 200~400KB（省 ~90% 空間）。
+        // 最長邊 2000px、JPEG 品質 0.85 → 通常 3~5MB 變 400~700KB（省 ~85% 空間）。
+        // 為什麼是 2000：4×6 相片印出來還有 330dpi；A5 約 240dpi；A4 全版約 170dpi（日常看沒問題）。
         // 任何一步失敗都回原檔 —— 寧可大一點，也不要傳不上去。
-        const PHOTO_MAX_SIDE = 1600;
-        const PHOTO_JPEG_Q = 0.82;
+        const PHOTO_MAX_SIDE = 2000;
+        const PHOTO_JPEG_Q = 0.85;
         const PHOTO_SKIP_UNDER = 300 * 1024;   // 已經很小的不重壓（省 CPU、不損畫質）
         let SHRINK_NOTE = '';                  // 這次省下多少（給使用者看）
 
@@ -1906,25 +1906,45 @@
             await loadStructureOptions($('project_id').value);
         }
 
-        // ---------- 一鍵壓縮既有照片（同一路徑覆蓋：網址不變、資料庫不用改）----------
+        // ---------- 既有的大照片：一次性自動壓縮（不用常駐按鈕）----------
+        // 只在第一次登入時問一次；問過就記在 localStorage，不再打擾。
+        const SHRINK_ASKED = 'wabi-shrink-asked-v1';
+        let SHRINKING = false;   // 正在壓縮中（避免重複觸發）
+
+        async function offerShrinkOnce() {
+            let asked = null;
+            try { asked = localStorage.getItem(SHRINK_ASKED); } catch (e) { asked = '1'; }
+            if (asked) return;
+            const photos = [];
+            entryList.forEach(e => (e.log_photos || []).forEach(p => {
+                if (p.photo_url) photos.push(p);
+            }));
+            if (!photos.length) return;
+            try { localStorage.setItem(SHRINK_ASKED, '1'); } catch (e) { /* 無痕模式就算了 */ }
+            if (!confirm(`現有 ${photos.length} 張照片是舊的、檔案很大（平均 3~5MB）。\n\n`
+                + '要現在一次性壓縮嗎？網址不變、紀錄不會被動到，只是檔案變小。\n'
+                + '（最長邊 2000px，印 4×6 相片仍有 330dpi，看得清楚）\n\n'
+                + '需要幾分鐘，請不要關掉頁面。')) return;
+            await shrinkExistingPhotos();
+        }
+
         function publicPathOf(url) {
             const m = String(url || '').match(/\/object\/public\/[^/]+\/(.+)$/);
             return m ? decodeURIComponent(m[1]) : null;
         }
 
-        async function shrinkExistingPhotos() {
+        async function shrinkExistingPhotos(alreadyConfirmed) {
             const all = [];
             entryList.forEach(e => (e.log_photos || []).forEach(p => {
                 if (p.photo_url) all.push(p);
             }));
             if (!all.length) return say('listMsg', '目前沒有照片。');
-            if (!confirm(`要把現有 ${all.length} 張照片重新壓縮嗎？\n\n`
-                + '網址不會變、紀錄不會被動到，只是檔案變小（最長邊 1600px）。\n'
-                + '手機照片大約從 3~5MB 變成 0.3MB，可省下大量空間。\n\n'
+            if (!alreadyConfirmed && !confirm(`要把現有 ${all.length} 張照片重新壓縮嗎？\n\n`
+                + '網址不會變、紀錄不會被動到，只是檔案變小（最長邊 2000px）。\n'
+                + '手機照片大約從 3~5MB 變成 0.5MB，可省下大量空間。\n\n'
                 + '需要一點時間（每張幾秒），請不要關掉這個頁面。')) return;
-
-            const btn = $('shrinkAllBtn');
-            if (btn) btn.disabled = true;
+            if (SHRINKING) return say('listMsg', '已經在壓縮了…', 'info');
+            SHRINKING = true;
             let okCount = 0, skip = 0, fail = 0, saved = 0;
             for (let i = 0; i < all.length; i++) {
                 say('listMsg', `🗜 壓縮中 ${i + 1}/${all.length}…`, 'info');
@@ -1946,7 +1966,7 @@
                     fail++;
                 }
             }
-            if (btn) btn.disabled = false;
+            SHRINKING = false;
             say('listMsg',
                 `🗜 完成：${okCount} 張已壓縮、省下 ${fmtSize(saved)}`
                 + (skip ? `；${skip} 張本來就很小` : '')
@@ -2078,7 +2098,6 @@
         $('changePwBtn').onclick = changePassword;
         $('saveNameBtn').onclick = saveDisplayName;
         $('reorderBtn').onclick = reorderAllPhotos;
-        $('shrinkAllBtn').onclick = shrinkExistingPhotos;
         $('formHead').onclick = () => setFormOpen();   // 點標題 → 展開／收起
         $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); showLogin(); };
 
