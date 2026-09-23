@@ -247,28 +247,10 @@
                 </div>
             </div>
 
-            <!-- 選了地點 ＋ 工項才出現：該進度卡的最新紀錄 + 兩種模式 -->
+            <!-- 選了工項才出現：這個工項目前的狀況（純顯示） -->
             <div id="latestWrap" class="hidden">
                 <div id="latestPanel"></div>
-                <div class="mode-tabs">
-                    <button type="button" class="mode-tab active" id="modeNew">＋ 新的進度更新</button>
-                    <button type="button" class="mode-tab" id="modeAppend">📷 補拍到上一筆</button>
-                </div>
                 <div class="hint" id="modeHint"></div>
-            </div>
-
-            <!-- 只有補拍模式才出現 -->
-            <div class="form-group hidden" id="appendNoteWrap">
-                <label>這批照片的<strong>拍攝日期</strong></label>
-                <input type="date" id="append_photo_date">
-                <div class="hint">
-                    預設＝這筆紀錄的日期。補<strong>舊照片</strong>時改成拍攝當天 ——
-                    系統會依這個日期把照片排到正確的位置（不是接在最後面）。
-                </div>
-                <label style="margin-top:12px;display:block">補充說明（選填）</label>
-                <textarea id="append_note" rows="2"
-                    placeholder="例：補拍同角度的收邊細節"></textarea>
-                <div class="hint">這段文字會<strong>附加</strong>到那筆紀錄的備註，不會蓋掉原本的內容。</div>
             </div>
 
             <div class="form-group" id="completeWrap" style="display:none">
@@ -844,43 +826,31 @@
             return r.changed ? `，並依拍攝日期重排了 ${r.changed} 張` : '';
         }
 
-        // ---------- 該項目的最新紀錄 + 兩種模式（新進度 / 補拍）----------
-        // 同一個工作事項有兩種情境，以前分不出來、都會變成兩筆紀錄：
-        //   ① 新的進度更新 → 建立新紀錄（時間軸多一個點，形成前後對照）
-        //   ② 補拍到上一筆 → 只把照片掛到既有紀錄（不新增紀錄、時間軸不變）
-        let CURRENT_MODE = 'new';
-        let APPEND_TARGET = null;      // 要補拍的那筆 project_logs
-        let APPEND_PHOTO_COUNT = 0;
-
+        // ---------- 這個工項目前的狀況（純顯示，不影響送出）----------
+        // 一個工項＝一條時間軸；**每一次上傳都自成一筆紀錄**（日期＝照片的拍攝日期）。
+        // 所以補舊照片不需要另一種模式：把日期填成拍攝當天就好，時間軸會自己排到正確位置。
         const fgOf = id => { const el = $(id); return el ? el.closest('.form-group') : null; };
         const setHidden = (el, hide) => { if (el) el.classList.toggle('hidden', !!hide); };
 
-        // workType / nodeId 只用來顯示「你現在在看哪一張進度卡」
         async function loadLatestLogForItem(itemId, workType, nodeId) {
-            APPEND_TARGET = null;
-            APPEND_PHOTO_COUNT = 0;
-            // 補拍的照片日期預設＝那筆紀錄的日期（換目標時要跟著換）
-            if ($('append_photo_date')) $('append_photo_date').value = '';
             const wt = String(workType || '').trim();
             const where = (nodeId && NODE_PATHS.get(nodeId)) || '';
             if (!wt) {
-                // 沒填工項＝不歸屬任何進度卡，沒有「進度對照」可言
+                // 沒填工項＝不歸屬任何進度卡
                 $('latestWrap').classList.add('hidden');
-                setMode('new');
                 return;
             }
             $('latestWrap').classList.remove('hidden');
 
             const item = itemId ? (ITEMS_BY_ID.get(itemId) || {}) : {};
-            const st = { completed: '已完成', in_progress: '進行中', paused: '暫停' }[item.status] || '未設定';
+            const st = { completed: '已完成', in_progress: '進行中', paused: '暫停' }[item.status] || '開案';
             const title = `${esc(wt)}${where ? '（' + esc(where) + '）' : ''}`;
+            const starting = `<div class="latest-box">${title} <strong>尚無紀錄</strong>`
+                + `（目前狀態：${esc(st)}）。這一筆會是它的<strong>起點</strong>。</div>`;
 
             if (!itemId) {
-                $('latestPanel').innerHTML =
-                    `<div class="latest-box">${title} <strong>尚無紀錄</strong>。
-                     這一筆會是它的<strong>起點</strong>。</div>`;
-                $('modeAppend').disabled = true;
-                setMode('new');
+                $('latestPanel').innerHTML = starting;
+                $('modeHint').innerHTML = '送出後會新增一筆紀錄 —— 這個工項的第一筆。';
                 return;
             }
 
@@ -895,136 +865,28 @@
             if (error) {
                 $('latestPanel').innerHTML =
                     `<div class="msg error">讀取這個工項的紀錄失敗：${esc(error.message)}</div>`;
-                $('modeAppend').disabled = true;
-                setMode('new');
                 return;
             }
 
             const latest = (data || [])[0];
             if (!latest) {
-                $('latestPanel').innerHTML =
-                    `<div class="latest-box">${title} <strong>尚無紀錄</strong>（目前狀態：${esc(st)}）。
-                     這一筆會是它的<strong>起點</strong>。</div>`;
-                $('modeAppend').disabled = true;
-                setMode('new');
+                $('latestPanel').innerHTML = starting;
+                $('modeHint').innerHTML = '送出後會新增一筆紀錄 —— 這個工項的第一筆。';
                 return;
             }
 
-            APPEND_TARGET = latest;
-            APPEND_PHOTO_COUNT = (latest.log_photos || []).length;
-            if ($('append_photo_date')) $('append_photo_date').value = latest.log_date || '';
-            $('modeAppend').disabled = false;
+            const shots = (latest.log_photos || []).length;
             const t = latest.log_time ? ' ' + String(latest.log_time).slice(0, 5) : '';
             $('latestPanel').innerHTML = `<div class="latest-box">
                 ${title} 狀態：<strong>${esc(st)}</strong>
                 ｜ 最新紀錄：<strong>${esc(latest.log_date)}</strong>${esc(t)}
-                ｜ 已有 <strong>${APPEND_PHOTO_COUNT}</strong> 張照片
+                ｜ 那一筆有 <strong>${shots}</strong> 張照片
                 ${latest.main_description
                     ? `<div class="hint">${esc(String(latest.main_description).slice(0, 60))}</div>` : ''}
             </div>`;
-            setMode(CURRENT_MODE);
-        }
-
-        // 切換模式：補拍模式只送照片，所以把「新紀錄」才需要的欄位收起來
-        function setMode(mode) {
-            if (mode === 'append' && !APPEND_TARGET) mode = 'new';
-            CURRENT_MODE = mode;
-            const append = mode === 'append';
-
-            $('modeNew').classList.toggle('active', !append);
-            $('modeAppend').classList.toggle('active', append);
-
-            // 地點與工項刻意**不隱藏**：補拍要看得見自己是補到哪一張進度卡
-            // （改了地點或工項，上方面板會跟著換成另一張卡）
-            setHidden($('dateTimeRow'), append);
-            setHidden($('completeWrap'), append);
-            ['main_description', 'issues_found', 'resolution', 'notes']
-                .forEach(id => setHidden(fgOf(id), append));
-            setHidden($('appendNoteWrap'), !append);
-
-            const t = (APPEND_TARGET && APPEND_TARGET.log_date) || '';
-            $('modeHint').innerHTML = append
-                ? `📷 <strong>補拍模式</strong>：照片會加到 <strong>${esc(t)}</strong> 那筆紀錄
-                   （不新增紀錄、時間軸不變）。`
-                : '記錄一個<strong>新的時間點</strong>（會新增一筆紀錄，形成進度對照）。';
-            $('submitBtn').textContent = append ? '補上照片到這筆紀錄' : '新增紀錄';
-        }
-
-        // ---------- 補拍：只把照片掛到既有紀錄 ----------
-        async function submitAppend() {
-            const projectId = $('project_id').value;
-            if (!APPEND_TARGET) return say('formMsg', '請先選好地點與工項（要補拍到哪一張進度卡）');
-            if (!pendingFiles.length && !collectPhotos().length) {
-                return say('formMsg', '補拍模式至少要選一張照片（或貼一個圖片網址）');
-            }
-            $('submitBtn').disabled = true;
-            say('formMsg', '處理照片中…', 'info');
-
-            let filePhotos = [];
-            if (pendingFiles.length) {
-                try {
-                    filePhotos = await uploadPendingFiles(projectId);
-                } catch (err) {
-                    $('submitBtn').disabled = false;
-                    $('uploadProgress').textContent = '';
-                    return say('formMsg', '照片上傳失敗：' + err.message);
-                }
-            }
-            // 這批照片的拍攝日期：預設＝目標那筆紀錄的日期；補舊照片時自己改成拍攝當天
-            const rawDate = $('append_photo_date') ? $('append_photo_date').value : '';
-            const photoDate = rawDate || APPEND_TARGET.log_date || null;
-            const photos = [...filePhotos, ...collectPhotos()]
-                .map(p => ({ ...p, taken_at: photoDate }));
-
-            // 先接在最後（維持 起點 → 最新）；補舊照片時下面會依拍攝日期重排
-            const { count } = await supabase
-                .from('log_photos')
-                .select('id', { count: 'exact', head: true })
-                .eq('log_id', APPEND_TARGET.id);
-            const base = count || 0;
-
-            const { error } = await supabase.from('log_photos').insert(
-                stripRec(stripTa(photos.map((p, i) =>
-                    ({ ...p, log_id: APPEND_TARGET.id, sort_order: base + i, recorder_name: MY_NAME || null }))))
-            );
-            if (error) {
-                $('submitBtn').disabled = false;
-                let extra = '';
-                if (error.code === '42501' || /row-level security/i.test(error.message || '')) {
-                    extra = '\n\n→ 資料庫權限擋下：只有 admin 或該專案的 owner / editor 能補照片。';
-                }
-                return say('formMsg', '照片寫入失敗：' + error.message + extra);
-            }
-
-            // 補充說明 → 附加到該筆紀錄的備註（不覆蓋原本的內容）
-            const noteText = ($('append_note') ? $('append_note').value : '').trim();
-            let noteNote = '';
-            if (noteText) {
-                const prev = APPEND_TARGET.notes || '';
-                const merged = prev ? prev + '\n' + noteText : noteText;
-                const { error: ne } = await supabase.from('project_logs')
-                    .update({ notes: merged }).eq('id', APPEND_TARGET.id);
-                noteNote = ne ? `（但備註更新失敗：${ne.message}）` : '，並附加了補充說明';
-            }
-            if ($('append_note')) $('append_note').value = '';
-
-            const targetDate = APPEND_TARGET.log_date;
-            // 依拍攝日期重排（補了比紀錄更早的照片時才會真的動到順序）
-            let orderNote = '';
-            try {
-                orderNote = reorderNote(await reorderLogPhotos(APPEND_TARGET.id, targetDate));
-            } catch (err) {
-                orderNote = `\n⚠️ 照片順序重排失敗：${err.message}`;
-            }
-
-            $('submitBtn').disabled = false;
-            say('formMsg',
-                `✅ 已補上 ${photos.length} 張照片到 ${targetDate} 的那筆紀錄`
-                + `（拍攝日期：${photoDate || '未填'}）${noteNote}${orderNote}。`
-                + '沒有新增紀錄，時間軸不變。', orderNote.includes('⚠️') ? 'error' : 'ok');
-            clearForm();
-            await loadEntries();
-            await loadStructureOptions($('project_id').value);
+            $('modeHint').innerHTML =
+                '送出後會<strong>新增一筆紀錄</strong>（日期＝上面選的日期）。'
+                + '補舊照片就把日期改成拍攝當天，時間軸會自己排到正確的位置。';
         }
 
         // ---------- 新增紀錄 ----------
@@ -1155,7 +1017,6 @@
                 if ($(id)) $(id).value = '';
             });
             if ($('workTypePick')) $('workTypePick').value = '';
-            if ($('append_photo_date')) $('append_photo_date').value = '';
             if ($('mark_complete')) $('mark_complete').checked = false;
             syncCompleteCheckbox();
             $('photos').innerHTML = '';
@@ -1807,16 +1668,12 @@
         $('loginBtn').onclick = signIn;
         $('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
         $('addPhotoBtn').onclick = () => addPhotoRow();
-        // 一顆送出鈕，依目前模式決定是「新增紀錄」還是「補照片到既有紀錄」
-        $('submitBtn').onclick = () => (CURRENT_MODE === 'append' ? submitAppend() : submitEntry());
+        // 送出＝永遠新增一筆紀錄（每一次上傳自成一筆）
+        $('submitBtn').onclick = () => submitEntry();
         $('changePwBtn').onclick = changePassword;
         $('saveNameBtn').onclick = saveDisplayName;
         $('reorderBtn').onclick = reorderAllPhotos;
         $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); showLogin(); };
-
-        // 模式切換
-        $('modeNew').onclick = () => setMode('new');
-        $('modeAppend').onclick = () => setMode('append');
 
         // 換專案 → 重載該專案的地點與工項，並清掉上一個專案的「最新紀錄」面板
         $('project_id').addEventListener('change', async () => {
@@ -1824,7 +1681,7 @@
             if ($('work_type')) $('work_type').value = '';
             await loadStructureOptions($('project_id').value);
         });
-        // 地點或工項改變 → 重新對應到那張進度卡（顯示最新紀錄 / 補拍目標）
+        // 地點或工項改變 → 重新對應到那張進度卡（顯示目前狀態與最新紀錄）
         $('node_id').addEventListener('change', () => refreshPair());
         $('workTypePick').addEventListener('change', () => {
             const v = $('workTypePick').value;

@@ -182,7 +182,50 @@
             background: rgba(168, 162, 158, 0.25);
             color: var(--color-accent);
         }
+        .chip.opened { background: rgba(61, 53, 45, 0.10); color: #6b6156; }
         .chip.done { background: rgba(107, 142, 92, 0.25); color: #4a6b3d; }
+
+        /* ---------------- 樹狀：狀態 → 工項 → 紀錄 ---------------- */
+        .tree-hint { font-size: 0.8rem; color: var(--color-muted); margin: -0.6rem 0 1.4rem; }
+        .grp { margin-bottom: 1.8rem; }
+        .grp-head {
+            display: flex; align-items: baseline; gap: 0.6rem;
+            padding: 0.5rem 0.2rem;
+            border-bottom: 2px solid rgba(90, 77, 63, 0.25);
+            cursor: pointer; user-select: none;
+        }
+        .grp-title { font-size: 1.05rem; font-weight: 500; letter-spacing: 0.06em; }
+        .grp-count { font-size: 0.75rem; color: var(--color-muted); }
+        .grp-caret { margin-left: auto; font-size: 0.8rem; color: var(--color-muted); transition: transform 0.2s; }
+        .grp.collapsed .grp-caret { transform: rotate(-90deg); }
+        .grp.collapsed .grp-body { display: none; }
+
+        .item-row { border-bottom: 1px solid rgba(90, 77, 63, 0.12); }
+        .item-head {
+            display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem 0.7rem;
+            padding: 0.8rem 0.2rem; cursor: pointer;
+        }
+        .item-head:hover { background: rgba(90, 77, 63, 0.04); }
+        .it-loc { font-size: 0.85rem; color: var(--color-accent); opacity: 0.75; }
+        .it-title { font-size: 1rem; font-weight: 500; }
+        .it-meta { flex-basis: 100%; font-size: 0.75rem; color: var(--color-muted); }
+        .it-edit {
+            margin-left: auto; font-size: 0.78rem; color: var(--color-accent);
+            text-decoration: none; border: 1px solid rgba(90, 77, 63, 0.3);
+            border-radius: 999px; padding: 0.15rem 0.65rem;
+        }
+        .it-caret { font-size: 0.75rem; color: var(--color-muted); transition: transform 0.2s; }
+        .item-row.open .it-caret { transform: rotate(90deg); }
+        .item-body { display: none; padding: 0.4rem 0.2rem 1.2rem 0.6rem; }
+        .item-row.open .item-body { display: block; }
+
+        .rec { border-left: 2px solid rgba(90, 77, 63, 0.18); padding: 0 0 1.1rem 0.9rem; }
+        .rec:last-child { padding-bottom: 0.2rem; }
+        .rec-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; font-size: 0.78rem; color: var(--color-muted); margin-bottom: 0.45rem; }
+        .rec-date { font-weight: 500; color: var(--color-accent); font-size: 0.85rem; }
+        .rec-desc { font-size: 0.92rem; margin-bottom: 0.5rem; white-space: pre-wrap; line-height: 1.6; }
+        .rec-todo { font-size: 0.82rem; color: var(--color-accent); opacity: 0.85; margin-bottom: 0.5rem; white-space: pre-wrap; }
+        .rec .strip { margin-top: 0.2rem; }
         .chip.doing { background: rgba(191, 139, 46, 0.22); color: #8a6a1e; }
         .chip.paused { background: rgba(139, 46, 46, 0.15); color: #8b5454; }
 
@@ -322,14 +365,10 @@
     </header>
 
     <section id="progress">
-        <h2 class="section-title">項目進度對照</h2>
+        <h2 class="section-title">工程進度</h2>
+        <div class="tree-hint">依狀態分組。點工項可展開看每個日期的紀錄與照片。</div>
         <div id="progressList"><div class="loading">正在讀取紀錄...</div></div>
     </section>
-
-    <div id="timeline">
-        <h2 class="section-title">依日期瀏覽</h2>
-        <div class="loading">正在讀取紀錄...</div>
-    </div>
 
     <div id="modal">
         <div class="modal-content">
@@ -390,7 +429,6 @@
             if (logsRes.error || photosRes.error) {
                 console.error('Error fetching logs:', logsRes.error || photosRes.error);
                 const msg = '<div class="loading">讀取失敗，請稍後再試。</div>';
-                document.getElementById('timeline').innerHTML = msg;
                 document.getElementById('progressList').innerHTML = msg;
                 return;
             }
@@ -406,8 +444,7 @@
                 photos: (byLog.get(l.id) || []).sort(photoOrder)
             }));
 
-            renderProgress(allLogs);
-            renderLogs(allLogs);
+            renderTree(allLogs);
         }
 
         // 照片順序：sort_order → 上傳時間 → 檔名裡的毫秒
@@ -428,114 +465,164 @@
             return uploadSeq(a) - uploadSeq(b);
         }
 
-        function renderLogs(logs) {
-            const timeline = document.getElementById('timeline');
-            timeline.innerHTML = '';
+        // ---------------- 樹狀：狀態 → 工項 → 紀錄 ----------------
+        // 一個「工項」＝一條時間軸。分組看的是**工項的狀態**（不是單筆紀錄的狀態）。
+        const STATUS_ORDER = ['', 'in_progress', 'paused', 'completed'];
+        const GROUP_TITLE = { '': '開案（待辦）', in_progress: '進行中', paused: '暫停', completed: '已完成' };
+        // 已完成＝做完的，預設收起來，資料多時才找得到東西
+        const COLLAPSED_BY_DEFAULT = { completed: true };
 
-            if (!logs || logs.length === 0) {
-                timeline.innerHTML = '<div class="loading">目前尚無紀錄。</div>';
-                return;
-            }
-
-            // 依日期分組
-            const groups = logs.reduce((acc, log) => {
-                const date = log.log_date || '未標記日期';
-                if (!acc[date]) acc[date] = [];
-                acc[date].push(log);
-                return acc;
-            }, {});
-
-            Object.keys(groups).sort((a, b) => new Date(b) - new Date(a)).forEach(date => {
-                const groupDiv = document.createElement('div');
-                groupDiv.className = 'date-group';
-
-                const cards = groups[date].map(log => {
-                    const photo = firstPhoto(log);
-                    const idx = logs.indexOf(log);
-                    return `
-                                <div class="log-card" onclick="showDetail(${idx})">
-                                    <div class="photo-container">
-                                        <img src="${esc(photo.photo_url) || PLACEHOLDER_CARD}" loading="lazy">
-                                    </div>
-                                    <div class="log-info">
-                                        <span class="log-location">${esc(log.node_name || log.location) || '未標記位置'}</span>
-                                        <span class="log-status">${esc(STATUS_LABEL[log.item_status || log.progress_status] || '')}</span>
-                                        ${log.recorder_name ? `<span class="log-by">紀錄：${esc(log.recorder_name)}</span>` : ''}
-                                    </div>
-                                </div>`;
-                }).join('');
-
-                groupDiv.innerHTML = `
-                            <div class="date-header">${esc(date)}</div>
-                            <div class="grid">${cards}</div>
-                        `;
-                timeline.appendChild(groupDiv);
-            });
+        function daysSince(d) {
+            if (!d) return null;
+            const ms = Date.now() - new Date(String(d) + 'T00:00:00').getTime();
+            if (isNaN(ms)) return null;
+            return ms < 0 ? 0 : Math.floor(ms / 86400000);
         }
 
-        // 項目進度對照：每個項目一條可左右滑動的照片時間軸（全部顯示，含進行中）
-        function renderProgress(logs) {
-            const box = document.getElementById('progressList');
-            if (!box) return;
+        function fmtMonthDay(d) {
+            const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+            return m ? `${Number(m[2])}/${Number(m[3])}` : String(d || '');
+        }
 
-            const withItem = logs.filter(l => l.item_id && l.photos && l.photos.length);
-            if (!withItem.length) {
-                box.innerHTML = '<div class="loading">還沒有指定項目的紀錄。</div>';
-                return;
+        // 待辦事項：一筆紀錄的 resolution 可能是一行一項
+        function todoLines(v) {
+            if (!v) return [];
+            return String(v).split(/\r?\n/)
+                .map(s => s.replace(/^[\s\-–—•・*]+/, '').trim())
+                .filter(Boolean);
+        }
+
+        // 純函式（方便測試）：把紀錄整理成 狀態 → 工項 → 紀錄 三層
+        function buildTree(logs) {
+            const byItem = new Map();
+            for (const l of (logs || [])) {
+                if (!l.item_id) continue;
+                if (!byItem.has(l.item_id)) byItem.set(l.item_id, []);
+                byItem.get(l.item_id).push(l);
             }
-
-            const groups = new Map();
-            for (const l of withItem) {
-                if (!groups.has(l.item_id)) groups.set(l.item_id, []);
-                groups.get(l.item_id).push(l);
-            }
-
-            let html = '';
-            for (const list of groups.values()) {
-                // 舊 → 新：時間軸由左到右就是施工的過程
+            const groups = STATUS_ORDER.map(st => ({ status: st, title: GROUP_TITLE[st], items: [] }));
+            const byStatus = new Map(groups.map(g => [g.status, g]));
+            for (const [itemId, list] of byItem) {
+                // 舊 → 新
                 const sorted = [...list].sort((a, b) =>
                     String(a.log_date || '').localeCompare(String(b.log_date || '')));
                 const last = sorted[sorted.length - 1];
-                const title = last.item_title || '（未命名項目）';
-                const loc = last.node_name || last.location || '';
-                const st = last.item_status || last.progress_status;
-                const stLabel = STATUS_LABEL[st] || '未設定';
-                const stCls = STATUS_CLASS[st] || '';
-
-                // 這個案子有幾個人做過（同一案件可能由不同紀錄人上傳）
-                const byNames = [...new Set(sorted.map(x => x.recorder_name).filter(Boolean))];
+                const raw = (last.item_status === null || last.item_status === undefined)
+                    ? last.progress_status : last.item_status;
+                const st = STATUS_ORDER.indexOf(raw) >= 0 ? raw : '';
                 let shots = 0;
-                const cells = [];
-                sorted.forEach((log, i) => {
-                    const multi = sorted.length > 1;
-                    const tag = multi && i === 0 ? '<span class="tag">起點</span>'
-                              : (multi && i === sorted.length - 1 ? '<span class="tag latest">最新</span>' : '');
-                    log.photos.forEach(ph => {
-                        shots++;
-                        // 照片上標明是誰拍的／誰做的（補拍會讓不同人加到同一筆紀錄）
-                        // 日期優先用「照片自己的拍攝日期」，沒有才退回紀錄日期
-                        const cap = [ph.taken_at || log.log_date, ph.recorder_name || log.recorder_name,
-                                     ph.photo_description].filter(Boolean).join(' · ');
-                        cells.push(`<figure class="shot" onclick="showDetailById('${esc(log.id)}')">
-                            ${tag}
-                            <img src="${esc(ph.photo_url)}" loading="lazy" alt="">
-                            <figcaption>${esc(cap)}</figcaption>
-                        </figure>`);
-                    });
+                for (const l of sorted) shots += (l.photos ? l.photos.length : 0);
+                byStatus.get(st).items.push({
+                    itemId, status: st,
+                    title: last.item_title || '（未命名工項）',
+                    loc: last.node_name || last.location || '',
+                    logs: sorted, shots,
+                    byNames: [...new Set(sorted.map(x => x.recorder_name).filter(Boolean))],
+                    opening: sorted[0].log_date || '',
+                    days: daysSince(sorted[0].log_date),
                 });
-
-                html += `<div class="progress-item">
-                    <div class="progress-head">
-                        <span class="progress-title">${esc(title)}</span>
-                        <span class="chip ${stCls}">${esc(stLabel)}</span>
-                        ${loc ? `<span class="progress-loc">${esc(loc)}</span>` : ''}
-                        ${byNames.length ? `<span class="progress-by">${esc(byNames.join('、'))}</span>` : ''}
-                        <span class="progress-count">${sorted.length} 筆紀錄 · ${shots} 張照片</span>
-                    </div>
-                    <div class="strip">${cells.join('')}</div>
-                </div>`;
             }
-            box.innerHTML = html;
+            for (const g of groups) {
+                // 未完成：開案最久的排上面（放越久越要看到）；已完成：最新的排上面
+                g.items.sort((a, b) => g.status === 'completed'
+                    ? String(b.opening).localeCompare(String(a.opening))
+                    : String(a.opening).localeCompare(String(b.opening)));
+            }
+            const shown = groups.filter(g => g.items.length);   // 空的組不顯示
+
+            // 沒有指定工項的紀錄（只記現場狀況）也不能消失 —— 收在最後一組，各自一列
+            const loose = (logs || []).filter(l => !l.item_id)
+                .sort((a, b) => String(b.log_date || '').localeCompare(String(a.log_date || '')));
+            if (loose.length) {
+                shown.push({
+                    status: '_loose', title: '未歸類（只記現場狀況）',
+                    items: loose.map(l => ({
+                        itemId: 'log:' + l.id, status: '_loose',
+                        title: (l.main_description || '').split('\n')[0].slice(0, 24) || '現場狀況',
+                        loc: l.node_name || l.location || '',
+                        logs: [l], shots: (l.photos ? l.photos.length : 0),
+                        byNames: l.recorder_name ? [l.recorder_name] : [],
+                        opening: l.log_date || '', days: daysSince(l.log_date),
+                    })),
+                });
+            }
+            return shown;
+        }
+
+        function shotFigure(ph, log) {
+            const cap = [ph.taken_at || log.log_date, ph.recorder_name || log.recorder_name,
+                         ph.photo_description].filter(Boolean).join(' · ');
+            return `<figure class="shot" onclick="showDetailById('${esc(log.id)}')">
+                <img src="${esc(ph.photo_url)}" loading="lazy" alt="">
+                <figcaption>${esc(cap)}</figcaption>
+            </figure>`;
+        }
+
+        function recBlock(log) {
+            const photos = log.photos || [];
+            const st = log.progress_status;
+            const todo = todoLines(log.resolution);
+            return `<div class="rec">
+                <div class="rec-head">
+                    <span class="rec-date">${esc(log.log_date) || '未標記日期'}</span>
+                    ${st ? `<span class="chip ${STATUS_CLASS[st] || ''}">${esc(STATUS_LABEL[st] || '')}</span>` : ''}
+                    ${log.recorder_name ? `<span class="rec-by">紀錄：${esc(log.recorder_name)}</span>` : ''}
+                    ${photos.length ? `<span class="rec-shots">${photos.length} 張照片</span>` : ''}
+                </div>
+                ${log.main_description ? `<div class="rec-desc">${esc(log.main_description)}</div>` : ''}
+                ${todo.length ? `<div class="rec-todo">待辦：${esc(todo.join('、'))}</div>` : ''}
+                ${photos.length ? `<div class="strip">${photos.map(ph => shotFigure(ph, log)).join('')}</div>` : ''}
+            </div>`;
+        }
+
+        function itemRow(it) {
+            const meta = [];
+            if (it.opening) meta.push(fmtMonthDay(it.opening) + ' 開案');
+            if (it.status !== 'completed' && it.days !== null) meta.push('已 ' + it.days + ' 天');
+            meta.push(it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片');
+            if (it.byNames.length) meta.push(it.byNames.join('、'));
+            return `<div class="item-row" data-item="${esc(it.itemId)}">
+                <div class="item-head" onclick="toggleItem(this)">
+                    ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
+                    <span class="it-title">${esc(it.title)}</span>
+                    ${it.status !== '_loose'
+                        ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`
+                        : ''}
+                    <a class="it-edit" href="entries.html" onclick="event.stopPropagation()">✎ 編輯</a>
+                    <span class="it-caret">▸</span>
+                    <div class="it-meta">${esc(meta.join(' · '))}</div>
+                </div>
+                <div class="item-body">${it.logs.map(recBlock).join('')}</div>
+            </div>`;
+        }
+
+        function renderTree(logs) {
+            const box = document.getElementById('progressList');
+            if (!box) return;
+            const groups = buildTree(logs);
+            if (!groups.length) {
+                box.innerHTML = '<div class="loading">還沒有指定工項的紀錄。</div>';
+                return;
+            }
+            box.innerHTML = groups.map(g => `
+                <div class="grp${COLLAPSED_BY_DEFAULT[g.status] ? ' collapsed' : ''}">
+                    <div class="grp-head" onclick="toggleGroup(this)">
+                        <span class="grp-title">${esc(g.title)}</span>
+                        <span class="grp-count">${g.items.length}</span>
+                        <span class="grp-caret">▾</span>
+                    </div>
+                    <div class="grp-body">${g.items.map(itemRow).join('')}</div>
+                </div>`).join('');
+        }
+
+        function toggleGroup(el) {
+            const grp = el.closest('.grp');
+            if (grp) grp.classList.toggle('collapsed');
+        }
+
+        function toggleItem(el) {
+            const row = el.closest('.item-row');
+            if (row) row.classList.toggle('open');
         }
 
         function showDetailById(logId) {
