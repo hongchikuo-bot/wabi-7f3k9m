@@ -1089,17 +1089,41 @@
             const { data, error } = await supabase
                 .from('project_logs')
                 .select('id, log_date, log_time, location, main_description, progress_status, '
-                       + 'issues_found, resolution, notes, project_id, item_id, node_id, '
+                       + 'issues_found, resolution, notes, project_id, item_id, node_id, created_at, '
                        + 'log_photos(id, photo_url, photo_description, sort_order, taken_at), items(title, work_type, status)')
                 .order('log_date', { ascending: false })
-                .limit(20);
+                .limit(50);
 
             if (error) {
                 $('entries').innerHTML = `<div class="msg error">讀取失敗：${esc(error.message)}</div>`;
                 return;
             }
-            entryList = data || [];
+            entryList = sortEntries(data || []);
             renderEntries();
+        }
+
+        // 列表排序（kk 指定）：
+        //   ① 未完成（有指定工項、進度卡還沒完成）→ 最上面，而且「放越久越上面」（日期舊的在前面）
+        //   ② 沒有指定工項的紀錄（純現場記錄）→ 中間，新的在前
+        //   ③ 已完成 → 最下面，新的在前
+        const isDoneLog = e => !!(e.items && e.items.status === 'completed');
+        const entryRank = e => (!e.item_id ? 1 : (isDoneLog(e) ? 2 : 0));
+
+        function sortEntries(list) {
+            return (list || []).slice().sort((a, b) => {
+                const ra = entryRank(a), rb = entryRank(b);
+                if (ra !== rb) return ra - rb;
+                // 未完成：越久越上面（日期升冪）；其他：越新越上面（日期降冪）
+                const asc = ra === 0;
+                const cmp = (x, y) => (x === y ? 0 : (x < y ? -1 : 1)) * (asc ? 1 : -1);
+                let c = cmp(String(a.log_date || ''), String(b.log_date || ''));
+                if (c) return c;
+                c = cmp(String(a.log_time || ''), String(b.log_time || ''));
+                if (c) return c;
+                // 最後用建立時間當決勝鍵，確保順序固定（不要靠資料庫回傳順序）
+                c = cmp(String(a.created_at || ''), String(b.created_at || ''));
+                return c || 0;
+            });
         }
 
         function renderEntries() {
