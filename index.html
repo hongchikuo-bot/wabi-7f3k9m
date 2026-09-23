@@ -187,7 +187,36 @@
 
         /* ---------------- 樹狀：狀態 → 工項 → 紀錄 ---------------- */
         .tree-hint { font-size: 0.8rem; color: var(--color-muted); margin: -0.6rem 0 1.4rem; }
-        .grp { margin-bottom: 1.8rem; }
+        /* 看板：四個狀態並排；螢幕不夠寬時左右滑動（手機四欄會擠成一條，沒法讀） */
+        .tree {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.9rem;
+            align-items: start;
+        }
+        .tree-nav { display: none; font-size: 0.78rem; color: var(--color-muted); margin: -0.6rem 0 1rem; }
+        /* 桌面版給看板更多寬度（其餘區塊維持 1000px） */
+        @media (min-width: 1001px) { #progress { max-width: 1240px; } }
+        @media (max-width: 1000px) {
+            .tree {
+                display: flex;
+                overflow-x: auto;
+                scroll-snap-type: x mandatory;
+                padding-bottom: 0.7rem;
+                -webkit-overflow-scrolling: touch;
+            }
+            .tree::-webkit-scrollbar { height: 4px; }
+            .tree::-webkit-scrollbar-thumb { background: rgba(90, 77, 63, 0.22); border-radius: 999px; }
+            .tree .grp { flex: 0 0 min(72vw, 330px); scroll-snap-align: start; }
+            .tree-nav { display: block; }
+        }
+        .grp {
+            padding: 0.4rem 0.9rem 0.9rem;
+            border-radius: 6px;
+            background: rgba(90, 77, 63, 0.035);
+            border: 1px solid rgba(90, 77, 63, 0.10);
+        }
+        .grp-empty { color: var(--color-muted); font-size: 0.8rem; padding: 0.7rem 0.2rem; }
         .grp-head {
             display: flex; align-items: baseline; gap: 0.6rem;
             padding: 0.5rem 0.2rem;
@@ -367,6 +396,7 @@
     <section id="progress">
         <h2 class="section-title">工程進度</h2>
         <div class="tree-hint">依狀態分組。點工項可展開看每個日期的紀錄與照片。</div>
+        <div class="tree-nav">← 左右滑動看其他狀態 →</div>
         <div id="progressList"><div class="loading">正在讀取紀錄...</div></div>
     </section>
 
@@ -528,7 +558,8 @@
                     ? String(b.opening).localeCompare(String(a.opening))
                     : String(a.opening).localeCompare(String(b.opening)));
             }
-            const shown = groups.filter(g => g.items.length);   // 空的組不顯示
+            // 看板固定四欄（空的也留著，才看得出整個結構；空欄顯示 0）
+            const shown = groups.slice();
 
             // 沒有指定工項的紀錄（只記現場狀況）也不能消失 —— 收在最後一組，各自一列
             const loose = (logs || []).filter(l => !l.item_id)
@@ -604,15 +635,17 @@
                 box.innerHTML = '<div class="loading">還沒有指定工項的紀錄。</div>';
                 return;
             }
-            box.innerHTML = groups.map(g => `
+            box.innerHTML = `<div class="tree">${groups.map(g => `
                 <div class="grp${COLLAPSED_BY_DEFAULT[g.status] ? ' collapsed' : ''}">
                     <div class="grp-head" onclick="toggleGroup(this)">
                         <span class="grp-title">${esc(g.title)}</span>
                         <span class="grp-count">${g.items.length}</span>
                         <span class="grp-caret">▾</span>
                     </div>
-                    <div class="grp-body">${g.items.map(itemRow).join('')}</div>
-                </div>`).join('');
+                    <div class="grp-body">${g.items.length
+                        ? g.items.map(itemRow).join('')
+                        : '<div class="grp-empty">—</div>'}</div>
+                </div>`).join('')}</div>`;
         }
 
         function toggleGroup(el) {
