@@ -101,6 +101,11 @@
         }
         .photo-item .taken-warn { font-size: 10px; color: #8b2e2e; margin-top: 2px; }
         .sub-label { font-size: 12px; color: var(--color-accent); margin-top: 12px; }
+        .list-tools {
+            display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+            margin: 6px 0 14px;
+        }
+        .list-tools .hint { margin-top: 0; flex: 1 1 200px; }
 
         /* 該項目的最新紀錄 + 模式切換 */
         .latest-box {
@@ -325,6 +330,13 @@
         <div class="card hidden" id="listCard">
             <h2>最近的紀錄</h2>
             <div id="listMsg"></div>
+            <div class="list-tools">
+                <button type="button" class="ghost small" id="reorderBtn">🖼 整理照片順序</button>
+                <div class="hint">
+                    把下面這幾筆的照片重新編號：<strong>先依拍攝日期，同一天再依上傳時間</strong>。
+                    舊紀錄（每張的順序都是 0）按一次就會排好，公開頁的第一張照片也會跟著修正。
+                </div>
+            </div>
             <div id="entries"></div>
         </div>
     </main>
@@ -699,18 +711,31 @@
         });
 
         // 依拍攝日期重算某筆紀錄所有照片的 sort_order。
-        // 沒填日期的照片＝視為「紀錄當天拍的」，排在已填日期的後面。
+        // 沒填日期的照片＝視為「紀錄當天拍的」。
+        // 排序鍵：拍攝日期 → 上傳時間 → 檔名裡的毫秒 → 舊的 sort_order
         // ⚠️ sort_order 是整數欄，不能用小數插隊 → 一定要重排。
+        // ⚠️ 一定要有「唯一且有意義」的決勝鍵：舊資料的 sort_order 全是 0，
+        //    只比 sort_order 會全部相等，最後沿用資料庫回傳順序（UPDATE 會把列搬到 heap 尾端 →
+        //    順序會整個反過來，實際發生過）。
         // ⚠️ 缺 UPDATE 政策時 update 不會報錯、只回 0 列 → 必須自己比對筆數。
+        const uploadSeq = p => {
+            const m = String((p && p.photo_url) || '').match(/\/(\d{13})-[a-z0-9]+\./i);
+            return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+        };
+
         async function reorderLogPhotos(logId, logDate) {
             if (!HAS_TAKEN_AT) return { total: 0, changed: 0, failed: 0 };
             const { data, error } = await supabase.from('log_photos')
-                .select('id, sort_order, taken_at').eq('log_id', logId);
+                .select('id, sort_order, taken_at, created_at, photo_url').eq('log_id', logId);
             if (error) throw new Error('讀取照片順序失敗：' + error.message);
             const fallback = logDate || '9999-12-31';
             const rows = (data || []).slice().sort((a, b) => {
                 const ka = a.taken_at || fallback, kb = b.taken_at || fallback;
                 if (ka !== kb) return ka < kb ? -1 : 1;
+                const ca = a.created_at || '', cb = b.created_at || '';
+                if (ca !== cb) return ca < cb ? -1 : 1;
+                const ua = uploadSeq(a), ub = uploadSeq(b);
+                if (ua !== ub) return ua - ub;
                 return (a.sort_order || 0) - (b.sort_order || 0);
             });
             let changed = 0, failed = 0;
@@ -1457,6 +1482,44 @@
             await loadStructureOptions($('project_id').value);
         }
 
+        // ---------- 一鍵整理照片順序（修舊資料用）----------
+        async function reorderAllPhotos() {
+            if (!HAS_TAKEN_AT) {
+                return say('listMsg',
+                    '拍攝日期功能還沒啟用（資料庫缺 log_photos.taken_at）→ 無法整理照片順序。', 'error');
+            }
+            if (!entryList.length) return say('listMsg', '目前沒有紀錄。', 'info');
+            const targets = entryList.filter(e => (e.log_photos || []).length > 1);
+            if (!targets.length) {
+                return say('listMsg', '這幾筆紀錄的照片都不到 2 張，不需要整理。', 'info');
+            }
+            const ok = confirm(`要重新整理這 ${targets.length} 筆紀錄的照片順序嗎？\n\n`
+                + '規則：先依「拍攝日期」，同一天再依「上傳時間」。\n'
+                + '只會改排列順序，不會刪除或修改照片本身。');
+            if (!ok) return;
+
+            const btn = $('reorderBtn');
+            if (btn) btn.disabled = true;
+            let changed = 0, failed = 0, errs = 0;
+            for (const e of targets) {
+                try {
+                    const r = await reorderLogPhotos(e.id, e.log_date);
+                    changed += r.changed;
+                    failed += r.failed;
+                } catch (err) {
+                    errs++;
+                }
+            }
+            if (btn) btn.disabled = false;
+            const bad = failed > 0 || errs > 0;
+            say('listMsg',
+                `已整理 ${targets.length} 筆紀錄的照片順序，改了 ${changed} 張`
+                + (failed ? `\n⚠️ 有 ${failed} 張沒寫進去（可能缺少 UPDATE 權限）。` : '')
+                + (errs ? `\n⚠️ 有 ${errs} 筆讀取失敗。` : '。公開頁重新整理即可看到。'),
+                bad ? 'error' : 'ok');
+            await loadEntries();
+        }
+
         // 刪除單張照片（Storage 檔案 + log_photos 那一列）
         async function deletePhoto(logId, photoId, photoUrl) {
             if (!photoId) return;
@@ -1540,6 +1603,7 @@
         // 一顆送出鈕，依目前模式決定是「新增紀錄」還是「補照片到既有紀錄」
         $('submitBtn').onclick = () => (CURRENT_MODE === 'append' ? submitAppend() : submitEntry());
         $('changePwBtn').onclick = changePassword;
+        $('reorderBtn').onclick = reorderAllPhotos;
         $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); showLogin(); };
 
         // 模式切換

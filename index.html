@@ -391,11 +391,22 @@
             renderLogs(allLogs);
         }
 
-        // 照片排序：先看 sort_order，沒設定就依建立時間
+        // 照片順序：sort_order → 上傳時間 → 檔名裡的毫秒
+        // ⚠️ 舊資料的 sort_order 全是 0（不是 null），只比 sort_order 會得到 0 ＝「相等」，
+        //    等於沿用 API 回傳的順序 → 卡片上的第一張照片其實是隨機的。
+        //    同一批上傳的照片 created_at 也會一模一樣，所以最後再用檔名裡的毫秒決勝。
+        function uploadSeq(p) {
+            const m = String((p && p.photo_url) || '').match(/\/(\d{13})-[a-z0-9]+\./i);
+            return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+        }
+
         function photoOrder(a, b) {
-            const sa = a.sort_order, sb = b.sort_order;
-            if (sa !== null && sa !== undefined && sb !== null && sb !== undefined) return sa - sb;
-            return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+            const sa = (a.sort_order === null || a.sort_order === undefined) ? 0 : a.sort_order;
+            const sb = (b.sort_order === null || b.sort_order === undefined) ? 0 : b.sort_order;
+            if (sa !== sb) return sa - sb;
+            const ca = a.created_at || '', cb = b.created_at || '';
+            if (ca !== cb) return ca < cb ? -1 : 1;
+            return uploadSeq(a) - uploadSeq(b);
         }
 
         function renderLogs(logs) {
