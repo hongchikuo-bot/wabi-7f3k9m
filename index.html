@@ -513,7 +513,8 @@
                     log.photos.forEach(ph => {
                         shots++;
                         // 照片上標明是誰拍的／誰做的（補拍會讓不同人加到同一筆紀錄）
-                        const cap = [log.log_date, ph.recorder_name || log.recorder_name,
+                        // 日期優先用「照片自己的拍攝日期」，沒有才退回紀錄日期
+                        const cap = [ph.taken_at || log.log_date, ph.recorder_name || log.recorder_name,
                                      ph.photo_description].filter(Boolean).join(' · ');
                         cells.push(`<figure class="shot" onclick="showDetailById('${esc(log.id)}')">
                             ${tag}
@@ -555,7 +556,9 @@
             // 每張標明是誰上傳的（補拍可以讓別人加到同一筆紀錄）
             const photos = (log.photos && log.photos.length) ? log.photos : [{}];
             modalShots.innerHTML = photos.map(ph => {
-                const cap = [ph.recorder_name, ph.photo_description].filter(Boolean).join(' · ');
+                // 日期優先用照片自己的拍攝日期
+                const cap = [ph.taken_at || log.log_date, ph.recorder_name, ph.photo_description]
+                    .filter(Boolean).join(' · ');
                 return `
                         <figure class="modal-shot">
                             <img src="${esc(ph.photo_url) || PLACEHOLDER_MODAL}" alt="">
