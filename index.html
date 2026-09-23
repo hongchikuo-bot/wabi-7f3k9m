@@ -278,6 +278,13 @@
         .rec-desc { font-size: 0.92rem; margin-bottom: 0.5rem; white-space: pre-wrap; line-height: 1.6; }
         .rec-todo { font-size: 0.82rem; color: var(--color-accent); opacity: 0.85; margin-bottom: 0.5rem; white-space: pre-wrap; }
         .rec .strip { margin-top: 0.2rem; }
+        /* 公開頁的待辦（唯讀） */
+        .pub-todos {
+            font-size: 0.82rem; color: var(--color-accent); opacity: 0.9;
+            border-left: 2px solid rgba(191, 139, 46, 0.6);
+            padding: 0.15rem 0 0.15rem 0.6rem; margin-bottom: 0.7rem; white-space: pre-wrap;
+        }
+        @media (max-width: 700px) { .pub-todos { font-size: 0.72rem; } }
         .chip.doing { background: rgba(191, 139, 46, 0.22); color: #8a6a1e; }
         .chip.paused { background: rgba(139, 46, 46, 0.15); color: #8b5454; }
 
@@ -445,6 +452,8 @@
         // 目前載入的紀錄，供 modal 以索引取用
         // （原本把 JSON.stringify 塞進 onclick 屬性，遇到引號就會壞掉）
         let allLogs = [];
+        // 公開頁的待辦（只顯示未完成的；來自 v_public_item_todos）
+        let PUBLIC_TODOS = [];
 
         // 照片已經在 fetchLogs 裡自己接到 log.photos 上（視圖之間沒有外鍵可嵌入）
         function firstPhoto(log) {
@@ -499,6 +508,13 @@
                 photos: (byLog.get(l.id) || []).sort(photoOrder)
             }));
 
+            // 待辦事項（公開頁只顯示未完成的；表還沒建就當作沒有，不會壞）
+            const { data: todoData } = await supabaseClient
+                .from('v_public_item_todos')
+                .select('id, item_id, text, done')
+                .order('created_at', { ascending: true });
+            PUBLIC_TODOS = todoData || [];
+
             renderTree(allLogs);
         }
 
@@ -546,14 +562,24 @@
             </div>`;
         }
 
+        // 待辦事項（公開頁唯讀）：只列未完成的
+        function todoList(it) {
+            const open = (it.todos || []).filter(t => !t.done);
+            if (!open.length) return '';
+            return `<div class="pub-todos">待辦：${open.map(t => esc(t.text)).join('、')}</div>`;
+        }
+
         function itemRow(it) {
             const meta = [];
             if (it.opening) meta.push(fmtMonthDay(it.opening) + ' 開案');
             if (it.status !== 'completed' && it.days !== null) meta.push('已 ' + it.days + ' 天');
+            const openTodos = (it.todos || []).filter(t => !t.done);
+            if (openTodos.length) meta.push('待辦 ' + openTodos.length + ' 項');
             meta.push(it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片');
             if (it.byNames.length) meta.push(it.byNames.join('、'));
             // 窄螢幕（欄位 ~90px）用短版摘要，不然整段文字會折成一團
-            const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`;
+            const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`
+                + (openTodos.length ? ` · 待辦${openTodos.length}` : '');
             return `<div class="item-row" data-item="${esc(it.itemId)}" onclick="toggleItem(this)">
                 <div class="item-head">
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
@@ -566,7 +592,7 @@
                     <div class="it-meta">${esc(meta.join(' · '))}</div>
                     <div class="it-meta-short">${esc(short)}</div>
                 </div>
-                <div class="item-body">${it.logs.map(recBlock).join('')}</div>
+                <div class="item-body">${todoList(it)}${it.logs.map(recBlock).join('')}</div>
             </div>`;
         }
 
@@ -574,6 +600,12 @@
             const box = document.getElementById('progressList');
             if (!box) return;
             const groups = buildTree(logs);
+            // 待辦掛在工項上（buildTree 不管待辦，這裡接上去）
+            for (const g of groups) {
+                for (const it of g.items) {
+                    it.todos = PUBLIC_TODOS.filter(t => t.item_id === it.itemId);
+                }
+            }
             LAST_TREE = groups;
             if (!groups.length) {
                 box.innerHTML = '<div class="loading">還沒有指定工項的紀錄。</div>';
@@ -641,6 +673,7 @@
                     <button class="sheet-close" onclick="closeItemSheet()">&times;</button>
                 </div>
                 <div class="it-meta" style="display:block;margin-bottom:1rem">${esc(meta)}</div>
+                ${todoList(it)}
                 ${it.logs.map(recBlock).join('')}
                 <a class="it-edit" href="entries.html" style="display:inline-block">✎ 編輯這個工項</a>`;
             document.getElementById('sheet').classList.add('open');

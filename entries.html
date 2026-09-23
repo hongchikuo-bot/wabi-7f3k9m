@@ -230,6 +230,28 @@
             .rec { padding-left: 0.5rem; }
             .rec-actions { flex-wrap: wrap; }
         }
+        /* 待辦事項（掛在工項上） */
+        .todos {
+            border: 1px solid rgba(90, 77, 63, 0.18); border-radius: 6px;
+            padding: 0.5rem 0.6rem; margin-bottom: 0.9rem; background: rgba(255, 253, 249, 0.7);
+        }
+        .todos-head { font-size: 0.78rem; color: var(--color-muted); margin-bottom: 0.35rem; letter-spacing: 0.05em; }
+        .todos-done-head { font-size: 0.72rem; color: var(--color-muted); margin: 0.5rem 0 0.25rem; }
+        .todo-row { display: flex; align-items: center; gap: 0.4rem; padding: 0.15rem 0; font-size: 0.9rem; }
+        .todo-row input { width: auto; margin: 0; flex: 0 0 auto; }
+        .todo-text { flex: 1 1 auto; word-break: break-word; }
+        .todo-row.done .todo-text { color: var(--color-muted); text-decoration: line-through; }
+        .todo-x {
+            border: none; background: none; color: var(--color-muted); cursor: pointer;
+            font-size: 0.75rem; padding: 0 0.2rem; flex: 0 0 auto;
+        }
+        .todo-x:hover { color: #8b5454; }
+        .todos [data-add-todo] { margin-top: 0.45rem; }
+        @media (max-width: 700px) {
+            .todos { padding: 0.4rem 0.35rem; }
+            .todo-row { font-size: 0.78rem; gap: 0.25rem; }
+        }
+
         /* 在編輯表單裡追加照片 */
         .edit-block .add-photo-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
         .edit-block .add-photo-bar button { width: auto; padding: 6px 12px; font-size: 12px; }
@@ -384,7 +406,21 @@
             </div><!-- /formWrap -->
         </div>
 
-        <!-- 帳號設定 -->
+        <!-- 現有紀錄 -->
+        <div class="card hidden" id="listCard">
+            <h2>工程紀錄</h2>
+            <div id="listMsg"></div>
+            <div class="list-tools">
+                <button type="button" class="ghost small" id="reorderBtn">🖼 整理照片順序</button>
+                <div class="hint">
+                    把下面這幾筆的照片重新編號：<strong>先依拍攝日期，同一天再依上傳時間</strong>。
+                    舊紀錄（每張的順序都是 0）按一次就會排好，公開頁的第一張照片也會跟著修正。
+                </div>
+            </div>
+            <div id="entries"></div>
+        </div>
+
+        <!-- 帳號設定（少用到，放最下面）-->
         <div class="card hidden" id="accountCard">
             <h2>帳號設定</h2>
             <div id="pwMsg"></div>
@@ -410,20 +446,6 @@
                 <input type="password" id="newPw2" autocomplete="new-password">
             </div>
             <button id="changePwBtn">修改密碼</button>
-        </div>
-
-        <!-- 現有紀錄 -->
-        <div class="card hidden" id="listCard">
-            <h2>最近的紀錄</h2>
-            <div id="listMsg"></div>
-            <div class="list-tools">
-                <button type="button" class="ghost small" id="reorderBtn">🖼 整理照片順序</button>
-                <div class="hint">
-                    把下面這幾筆的照片重新編號：<strong>先依拍攝日期，同一天再依上傳時間</strong>。
-                    舊紀錄（每張的順序都是 0）按一次就會排好，公開頁的第一張照片也會跟著修正。
-                </div>
-            </div>
-            <div id="entries"></div>
         </div>
     </main>
 
@@ -468,6 +490,7 @@
             const { data: { user } } = await supabase.auth.getUser();
             await probeTakenAt();
             await probeRecorder();
+            if (!HAS_TODOS) await loadTodos();   // 先探一次（失敗也無所謂，畫面照常）
             await fetchMyName();
             $('whoami').textContent = MY_NAME
                 ? `${MY_NAME}（${(user && user.email) || ''}）`
@@ -476,6 +499,7 @@
             const missing = [];
             if (!HAS_TAKEN_AT) missing.push('照片的「拍攝日期」（缺 log_photos.taken_at）');
             if (!HAS_RECORDER) missing.push('「紀錄人」（缺 project_logs.recorder_name 與公開頁的外掛視圖）');
+            if (!HAS_TODOS) missing.push('「待辦清單」（缺 item_todos 表，要跑 sql/add-item-todos.sql）');
             if (missing.length) {
                 say('formMsg', 'ℹ️ 還沒啟用的功能：' + missing.join('、')
                     + '。\n其他功能都正常；跑一次 private-docs/sql 裡的 SQL，重新整理後就會自動啟用。', 'info');
@@ -1075,6 +1099,23 @@
                 }
             }
 
+            // 待辦事項 → 同時掛到工項上（跨紀錄延續；下次進來就是可勾的框）
+            // 同一項未完成的待辦不重複建立（重複打字不會變兩條）
+            let todoNote = '';
+            if (HAS_TODOS && itemId) {
+                const wanted = todoLines(payload.resolution);
+                const fresh = wanted.filter(x =>
+                    !TODOS.some(t => t.item_id === itemId && !t.done && t.text === x));
+                if (fresh.length) {
+                    const { error: tErr } = await supabase.from('item_todos').insert(
+                        fresh.map(x => ({ item_id: itemId, project_id: projectId, text: x,
+                                          done: false, log_id: log.id,
+                                          recorder_name: MY_NAME || null })));
+                    todoNote = tErr ? `（但待辦清單沒寫進去：${tErr.message}）`
+                                    : `，並建立 ${fresh.length} 項待辦`;
+                }
+            }
+
             // 勾了「這次拍攝後已完成」→ 順手把進度卡結案
             let extra = '', hadErr = false;
             if (itemId && markComplete) {
@@ -1088,7 +1129,7 @@
             const pair = workType ? `（${where ? where + ' · ' : ''}${workType}）` : '';
 
             $('submitBtn').disabled = false;
-            say('formMsg', `✅ 已新增 1 筆紀錄${photos.length ? ` 與 ${photos.length} 張照片` : ''}${pair}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
+            say('formMsg', `✅ 已新增 1 筆紀錄${photos.length ? ` 與 ${photos.length} 張照片` : ''}${todoNote}${pair}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
             clearForm();
             setFormOpen(false);   // 收起來，回到看板（成功訊息留在標題上方）
             await loadEntries();
@@ -1125,6 +1166,55 @@
         let EDIT_URLS = [];          // [{ url, desc }]
         let savingEdit = false;
 
+        // ---------- 待辦事項（掛在工項上，跨紀錄延續）----------
+        // kk：「填過的待辦，下次進去變成可勾的框；勾了＝完成；還是可以繼續加。」
+        // 所以待辦是**工項層級**的清單，不是寫在單筆紀錄裡就沒了。
+        let TODOS = [];          // 全部待辦（小表，一次載完；量大了再改成只載當前專案）
+        let HAS_TODOS = false;   // item_todos 表存不存在（SQL 還沒跑 → false，畫面照常運作）
+        const todosOf = itemId => TODOS.filter(t => t.item_id === itemId);
+
+        // ⚠️ 用「明確欄位」探：select('*') 少欄位不會報錯，會驗不出來
+        async function loadTodos() {
+            const { data, error } = await supabase.from('item_todos')
+                .select('id, item_id, text, done, done_at, log_id, created_at')
+                .order('created_at', { ascending: true });
+            HAS_TODOS = !error;
+            TODOS = error ? [] : (data || []);
+            return HAS_TODOS;
+        }
+
+        async function toggleTodo(id, done) {
+            const before = TODOS.find(x => x.id === id);
+            const { error } = await supabase.from('item_todos')
+                .update({ done: !!done, done_at: done ? new Date().toISOString() : null })
+                .eq('id', id).select('id');
+            if (error) {
+                say('listMsg', '待辦更新失敗：' + error.message, 'error');
+                return renderEntries();          // 重畫 → 勾選狀態回到資料庫的樣子
+            }
+            if (before) { before.done = !!done; before.done_at = done ? new Date().toISOString() : null; }
+            renderEntries();
+        }
+
+        async function addTodo(itemId) {
+            const text = String(prompt('新增待辦事項（例：塗底漆）') || '').trim();
+            if (!text) return;
+            const { data, error } = await supabase.from('item_todos')
+                .insert([{ item_id: itemId, text, done: false, recorder_name: MY_NAME || null }])
+                .select().single();
+            if (error) return say('listMsg', '待辦新增失敗：' + error.message, 'error');
+            if (data) TODOS.push(data);
+            renderEntries();
+        }
+
+        async function deleteTodo(id) {
+            if (!confirm('刪除這項待辦？')) return;
+            const { error } = await supabase.from('item_todos').delete().eq('id', id);
+            if (error) return say('listMsg', '待辦刪除失敗：' + error.message, 'error');
+            TODOS = TODOS.filter(t => t.id !== id);
+            renderEntries();
+        }
+
         async function loadEntries() {
             const recCol = HAS_RECORDER ? ', recorder_name' : '';
             const photoCols = 'id, photo_url, photo_description, sort_order, taken_at'
@@ -1144,6 +1234,7 @@
             }
             EARLIEST_LOG_DATE = buildEarliestMap(data);
             entryList = sortEntries(data || []);
+            await loadTodos();     // 待辦清單（表還沒建也不影響，HAS_TODOS 會是 false）
             renderEntries();
         }
 
@@ -1272,6 +1363,26 @@
             </div>`;
         }
 
+        // 待辦清單（工項層級）：未完成的在上面，已經勾掉的留著但淡化
+        function todoBlock(it) {
+            if (!HAS_TODOS || it.status === '_loose') return '';
+            const list = todosOf(it.itemId);
+            const open = list.filter(t => !t.done);
+            const done = list.filter(t => t.done);
+            const row = t => `<div class="todo-row${t.done ? ' done' : ''}">
+                <input type="checkbox" data-todo="${esc(t.id)}"${t.done ? ' checked' : ''}>
+                <span class="todo-text">${esc(t.text)}</span>
+                <button type="button" class="todo-x" data-del-todo="${esc(t.id)}" title="刪除這項待辦">✕</button>
+            </div>`;
+            return `<div class="todos">
+                <div class="todos-head">待辦事項</div>
+                ${open.length ? open.map(row).join('')
+                    : (done.length ? '' : '<div class="hint">目前沒有待辦。</div>')}
+                ${done.length ? `<div class="todos-done-head">已完成 ${done.length} 項</div>` + done.map(row).join('') : ''}
+                <button type="button" class="ghost small" data-add-todo="${esc(it.itemId)}">＋ 新增待辦</button>
+            </div>`;
+        }
+
         function boardItem(it) {
             const meta = [];
             if (it.opening) meta.push(fmtMonthDay(it.opening) + ' 開案');
@@ -1290,7 +1401,7 @@
                     <div class="it-meta">${esc(meta.join(' · '))}</div>
                     <div class="it-meta-short">${esc(short)}</div>
                 </div>
-                <div class="item-body">${it.logs.map(boardRecord).join('')}</div>
+                <div class="item-body">${todoBlock(it)}${it.logs.map(boardRecord).join('')}</div>
             </div>`;
         }
 
@@ -1333,6 +1444,16 @@
         }
 
         function bindEntryActions(box) {
+            box.querySelectorAll('[data-todo]').forEach(cb => {
+                cb.onchange = () => toggleTodo(cb.getAttribute('data-todo'), cb.checked);
+            });
+            box.querySelectorAll('[data-add-todo]').forEach(b => {
+                b.onclick = () => addTodo(b.getAttribute('data-add-todo'));
+            });
+            box.querySelectorAll('[data-del-todo]').forEach(b => {
+                b.onclick = ev => { ev.preventDefault(); ev.stopPropagation();
+                                    deleteTodo(b.getAttribute('data-del-todo')); };
+            });
             box.querySelectorAll('[data-del]').forEach(btn => {
                 btn.onclick = () => deleteEntry(btn.getAttribute('data-del'));
             });
