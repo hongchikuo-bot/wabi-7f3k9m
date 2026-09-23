@@ -135,6 +135,15 @@
         .entry .title { font-weight: 600; font-size: 14px; }
         .entry .meta { font-size: 12px; color: var(--color-muted); }
         .entry .desc { font-size: 13px; margin-top: 4px; word-break: break-word; }
+        /* 未完成紀錄的待辦事項（來源：那筆紀錄的「待辦事項 / 下一步」欄位） */
+        .entry .todo {
+            margin-top: 6px; padding: 6px 9px; border-radius: 4px;
+            background: #f7f2e8; border-left: 3px solid #c9b98f;
+        }
+        .entry .todo .todo-head { font-size: 11px; color: #9a8a68; }
+        .entry .todo .todo-item {
+            font-size: 12.5px; color: #4a4436; line-height: 1.6; word-break: break-word;
+        }
         /* 已完成標示（來源：進度卡 items.status，不是這筆紀錄的快照） */
         .badge {
             display: inline-block; font-size: 11px; line-height: 1.7;
@@ -278,8 +287,10 @@
             </div>
 
             <div class="form-group">
-                <label>解決方案 / 下一步</label>
-                <textarea id="resolution" rows="2"></textarea>
+                <label>待辦事項 / 下一步</label>
+                <textarea id="resolution" rows="3"
+                    placeholder="一行一項，例：&#10;塗底漆&#10;塗彈泥&#10;塗面漆"></textarea>
+                <div class="hint">開案時寫這裡＝這個案子要做的事；未完成的紀錄會把它顯示在列表上。</div>
             </div>
 
             <div class="form-group">
@@ -1190,6 +1201,14 @@
                 }
                 // 「已完成」看的是**進度卡現在的狀態**（items.status 是唯一真相）
                 const isDone = !!(e.items && e.items.status === 'completed');
+                // 待辦事項：未完成的紀錄才顯示（一行一項）
+                const todoLines = String(e.resolution || '').split('\n')
+                    .map(s => s.trim()).filter(Boolean);
+                const todoHtml = (entryRank(e) === 0 && todoLines.length)
+                    ? `<div class="todo"><span class="todo-head">待辦 ${todoLines.length} 項</span>`
+                        + todoLines.map(x => `<div class="todo-item">・${esc(x)}</div>`).join('')
+                        + '</div>'
+                    : '';
                 return `
                 <div class="entry">
                     <img src="${esc(photo.photo_url || '')}" alt="" onerror="this.style.visibility='hidden'">
@@ -1197,6 +1216,7 @@
                         <div class="title">${esc(e.log_date)} · ${esc(e.location || '未標記位置')}</div>
                         <div class="meta">${esc(metaBits.join(' · '))}</div>
                         <div class="desc">${esc(e.main_description || '')}</div>
+                        ${todoHtml}
                         ${editingEntryId === e.id ? renderEditForm(e) : ''}
                     </div>
                     <div class="entry-actions">
@@ -1287,8 +1307,9 @@
                         <textarea id="ee-desc" rows="2">${esc(e.main_description || '')}</textarea></div>
                     <div class="full"><label>發現問題</label>
                         <textarea id="ee-issues" rows="2">${esc(e.issues_found || '')}</textarea></div>
-                    <div class="full"><label>解決方案 / 下一步</label>
-                        <textarea id="ee-resolution" rows="2">${esc(e.resolution || '')}</textarea></div>
+                    <div class="full"><label>待辦事項 / 下一步</label>
+                        <textarea id="ee-resolution" rows="3"
+                            placeholder="一行一項">${esc(e.resolution || '')}</textarea></div>
                     <div class="full"><label>備註</label>
                         <textarea id="ee-notes" rows="2">${esc(e.notes || '')}</textarea></div>
                 </div>
