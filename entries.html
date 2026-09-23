@@ -412,9 +412,12 @@
             <div id="listMsg"></div>
             <div class="list-tools">
                 <button type="button" class="ghost small" id="reorderBtn">🖼 整理照片順序</button>
+                <button type="button" class="ghost small" id="shrinkAllBtn">🗜 壓縮既有照片</button>
                 <div class="hint">
-                    把下面這幾筆的照片重新編號：<strong>先依拍攝日期，同一天再依上傳時間</strong>。
-                    舊紀錄（每張的順序都是 0）按一次就會排好，公開頁的第一張照片也會跟著修正。
+                    <strong>整理照片順序</strong>：把下面這幾筆的照片重新編號（先依拍攝日期，同一天再依上傳時間）。
+                    舊紀錄（每張的順序都是 0）按一次就會排好，公開頁的第一張照片也會跟著修正。<br>
+                    <strong>壓縮既有照片</strong>：把已經上傳的大照片縮小（網址不變、紀錄不動），省儲存空間。
+                    新上傳的照片會自動壓縮，不用按。
                 </div>
             </div>
             <div id="entries"></div>
@@ -786,17 +789,87 @@
             }
         }
 
+        // ---------- 上傳前壓縮（紀錄用不需要原檔；手機照片動輒 3~8MB）----------
+        // 最長邊 1600px、JPEG 品質 0.82 → 通常 3~8MB 變 200~400KB（省 ~90% 空間）。
+        // 任何一步失敗都回原檔 —— 寧可大一點，也不要傳不上去。
+        const PHOTO_MAX_SIDE = 1600;
+        const PHOTO_JPEG_Q = 0.82;
+        const PHOTO_SKIP_UNDER = 300 * 1024;   // 已經很小的不重壓（省 CPU、不損畫質）
+        let SHRINK_NOTE = '';                  // 這次省下多少（給使用者看）
+
+        const fmtSize = b => (b >= 1048576)
+            ? (b / 1048576).toFixed(1) + ' MB'
+            : Math.max(1, Math.round(b / 1024)) + ' KB';
+
+        function loadImageEl(file) {
+            return new Promise(resolve => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+                img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+                img.src = url;
+            });
+        }
+
+        // 外層保命：壓縮任何一步出錯 → 直接原檔上傳（不能因為壓縮失敗就傳不上去）
+        async function shrinkImage(file) {
+            try {
+                return await shrinkImageInner(file);
+            } catch (err) {
+                return file;
+            }
+        }
+
+        async function shrinkImageInner(file) {
+            if (!file || !/^image\//.test(file.type || '')) return file;
+            let src = null, cleanup = () => {};
+            try {
+                // imageOrientation: 'from-image' → 套用 EXIF 方向，不然手機直拍會躺著
+                src = await createImageBitmap(file, { imageOrientation: 'from-image' });
+                cleanup = () => { if (src && src.close) src.close(); };
+            } catch (err) {
+                src = await loadImageEl(file);    // 退回 <img> 解碼（現代瀏覽器也會套用 EXIF 方向）
+            }
+            if (!src || !src.width) return file;
+            const max = Math.max(src.width, src.height);
+            if (file.size <= PHOTO_SKIP_UNDER && max <= PHOTO_MAX_SIDE) { cleanup(); return file; }
+
+            const scale = max > PHOTO_MAX_SIDE ? PHOTO_MAX_SIDE / max : 1;
+            const w = Math.max(1, Math.round(src.width * scale));
+            const h = Math.max(1, Math.round(src.height * scale));
+            let blob = null;
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                canvas.getContext('2d').drawImage(src, 0, 0, w, h);
+                blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', PHOTO_JPEG_Q));
+            } catch (err) {
+                blob = null;
+            } finally {
+                cleanup();
+            }
+            if (!blob || blob.size >= file.size) return file;   // 沒變小就用原檔
+            const name = String(file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg';
+            return new File([blob], name, { type: 'image/jpeg' });
+        }
+
         // 共用的上傳器：list = [{ file, desc }]，回傳可直接寫入 log_photos 的列
         async function uploadFileList(list, projectId, onProgress) {
             const rows = [];
-            let done = 0;
+            let done = 0, savedBytes = 0, savedCount = 0;
             for (const item of list) {
-                const ext = (item.file.name.split('.').pop() || 'jpg').toLowerCase().slice(0, 5);
+                const up = await shrinkImage(item.file);
+                if (up !== item.file && up.size < item.file.size) {
+                    savedBytes += item.file.size - up.size;
+                    savedCount++;
+                }
+                const ext = (up.name.split('.').pop() || 'jpg').toLowerCase().slice(0, 5);
                 const path = `${projectId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-                const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, item.file, {
+                const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, up, {
                     cacheControl: '31536000',
                     upsert: false,
-                    contentType: item.file.type || 'image/jpeg'
+                    contentType: up.type || 'image/jpeg'
                 });
                 if (error) throw new Error(`（${item.file.name}）${error.message}`);
                 const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
@@ -804,6 +877,8 @@
                 done++;
                 if (onProgress) onProgress(done, list.length);
             }
+            SHRINK_NOTE = savedCount
+                ? `（${savedCount} 張已壓縮，省下 ${fmtSize(savedBytes)}）` : '';
             return rows;
         }
 
@@ -1129,7 +1204,7 @@
             const pair = workType ? `（${where ? where + ' · ' : ''}${workType}）` : '';
 
             $('submitBtn').disabled = false;
-            say('formMsg', `✅ 已新增 1 筆紀錄${photos.length ? ` 與 ${photos.length} 張照片` : ''}${todoNote}${pair}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
+            say('formMsg', `✅ 已新增 1 筆紀錄${photos.length ? ` 與 ${photos.length} 張照片` : ''}${SHRINK_NOTE}${todoNote}${pair}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
             clearForm();
             setFormOpen(false);   // 收起來，回到看板（成功訊息留在標題上方）
             await loadEntries();
@@ -1825,10 +1900,59 @@
             EDIT_URLS = [];
             const bad = [photoNote, dateNote, orderNote, statusNote]
                 .some(s => s.includes('失敗') || s.includes('⚠️'));
-            say('listMsg', `✅ 紀錄已更新${photoNote}${dateNote}${orderNote}${statusNote}。`
+            say('listMsg', `✅ 紀錄已更新${photoNote}${SHRINK_NOTE}${dateNote}${orderNote}${statusNote}。`
                 + '公開頁面重新整理即可看到（照片順序以拍攝日期為準）。', bad ? 'error' : 'ok');
             await loadEntries();
             await loadStructureOptions($('project_id').value);
+        }
+
+        // ---------- 一鍵壓縮既有照片（同一路徑覆蓋：網址不變、資料庫不用改）----------
+        function publicPathOf(url) {
+            const m = String(url || '').match(/\/object\/public\/[^/]+\/(.+)$/);
+            return m ? decodeURIComponent(m[1]) : null;
+        }
+
+        async function shrinkExistingPhotos() {
+            const all = [];
+            entryList.forEach(e => (e.log_photos || []).forEach(p => {
+                if (p.photo_url) all.push(p);
+            }));
+            if (!all.length) return say('listMsg', '目前沒有照片。');
+            if (!confirm(`要把現有 ${all.length} 張照片重新壓縮嗎？\n\n`
+                + '網址不會變、紀錄不會被動到，只是檔案變小（最長邊 1600px）。\n'
+                + '手機照片大約從 3~5MB 變成 0.3MB，可省下大量空間。\n\n'
+                + '需要一點時間（每張幾秒），請不要關掉這個頁面。')) return;
+
+            const btn = $('shrinkAllBtn');
+            if (btn) btn.disabled = true;
+            let okCount = 0, skip = 0, fail = 0, saved = 0;
+            for (let i = 0; i < all.length; i++) {
+                say('listMsg', `🗜 壓縮中 ${i + 1}/${all.length}…`, 'info');
+                const path = publicPathOf(all[i].photo_url);
+                if (!path) { fail++; continue; }
+                try {
+                    const { data: blob, error } = await supabase.storage.from(PHOTO_BUCKET).download(path);
+                    if (error || !blob) throw new Error(error ? error.message : '下載失敗');
+                    const before = blob.size;
+                    const name = path.split('/').pop() || 'photo.jpg';
+                    const small = await shrinkImage(new File([blob], name, { type: blob.type || 'image/jpeg' }));
+                    if (small.size >= before) { skip++; continue; }
+                    const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET)
+                        .upload(path, small, { upsert: true, contentType: 'image/jpeg', cacheControl: '31536000' });
+                    if (upErr) throw new Error(upErr.message);
+                    okCount++;
+                    saved += before - small.size;
+                } catch (err) {
+                    fail++;
+                }
+            }
+            if (btn) btn.disabled = false;
+            say('listMsg',
+                `🗜 完成：${okCount} 張已壓縮、省下 ${fmtSize(saved)}`
+                + (skip ? `；${skip} 張本來就很小` : '')
+                + (fail ? `；${fail} 張失敗（如果是權限問題，跟我說我給 SQL）` : '')
+                + '。', fail ? 'error' : 'ok');
+            await loadEntries();
         }
 
         // ---------- 一鍵整理照片順序（修舊資料用）----------
@@ -1954,6 +2078,7 @@
         $('changePwBtn').onclick = changePassword;
         $('saveNameBtn').onclick = saveDisplayName;
         $('reorderBtn').onclick = reorderAllPhotos;
+        $('shrinkAllBtn').onclick = shrinkExistingPhotos;
         $('formHead').onclick = () => setFormOpen();   // 點標題 → 展開／收起
         $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); showLogin(); };
 
