@@ -1865,9 +1865,11 @@
                 <div class="hint">預設＝這筆紀錄的日期（${esc(e.log_date || '')}）。
                     補<strong>舊照片</strong>時改成拍攝當天 —— 系統會依拍攝日期把照片排到正確的位置。</div>
                 <div class="add-photo-bar">
-                    <button type="button" class="ghost small" id="ee-pick-photos">📷 選擇照片</button>
+                    <button type="button" class="ghost small" id="ee-pick-photos">🖼 從相簿選</button>
+                    <button type="button" class="ghost small" id="ee-camera">📷 拍照（可連續）</button>
                 </div>
                 <input type="file" id="ee-photo-files" accept="image/*" multiple class="hidden">
+                <input type="file" id="ee-camera-files" accept="image/*" capture="environment" class="hidden">
                 <div id="ee-photo-preview"></div>
                 <div id="ee-photo-urls"></div>
                 <div class="hint">按「儲存」時才上傳；新照片會接在既有照片<strong>後面</strong>，不蓋掉原本的。</div>
@@ -1946,6 +1948,24 @@
                         added++;
                     }
                     ev.target.value = '';   // 允許重選同一個檔案
+                    if (!added && files.length) say('listMsg', '只能上傳圖片檔', 'error');
+                    renderEditPhotoPreview();
+                };
+            }
+            // 拍照（可連續）：跟新增紀錄那顆一樣
+            const cam = box.querySelector('#ee-camera');
+            const camInput = box.querySelector('#ee-camera-files');
+            if (cam && camInput) {
+                cam.onclick = () => camInput.click();
+                camInput.onchange = ev => {
+                    const files = [...(ev.target.files || [])];
+                    let added = 0;
+                    for (const f of files) {
+                        if (!String(f.type || '').startsWith('image/')) continue;
+                        EDIT_FILES.push({ file: f, desc: '' });
+                        added++;
+                    }
+                    ev.target.value = '';   // 允許再拍一張
                     if (!added && files.length) say('listMsg', '只能上傳圖片檔', 'error');
                     renderEditPhotoPreview();
                 };
