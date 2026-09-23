@@ -375,15 +375,23 @@ export async function getLogCountByItem(projectId) {
 
 // 某個項目的所有紀錄（由舊到新，含照片）——這就是「一個項目的完整生命週期」
 export async function getItemLogs(itemId) {
-  const { data, error } = await supabase
+  const base = 'id, log_date, log_time, location, main_description, progress_status, '
+             + 'issues_found, resolution, notes, created_at';
+  const cols = withRec => base + (withRec ? ', recorder_name' : '') + ', '
+    + (withRec ? 'log_photos(id, photo_url, photo_description, sort_order, recorder_name)'
+               : 'log_photos(id, photo_url, photo_description, sort_order)');
+  const run = sel => supabase
     .from('project_logs')
-    .select('id, log_date, log_time, location, main_description, progress_status, '
-          + 'issues_found, resolution, notes, created_at, '
-          + 'log_photos(id, photo_url, photo_description, sort_order)')
+    .select(sel)
     .eq('item_id', itemId)
     // 時間軸由舊到新：第一筆＝起點，最後一筆＝最新
     .order('log_date', { ascending: true })
     .order('created_at', { ascending: true });
+
+  // 紀錄人是後加的欄位：先試有紀錄人的版本，欄位還沒加就自動退回舊版
+  // （不要因為一個新欄位讓整個「進度歷程」打不開）
+  let { data, error } = await run(cols(true));
+  if (error) ({ data, error } = await run(cols(false)));
   if (error) throw error;
   return data || [];
 }

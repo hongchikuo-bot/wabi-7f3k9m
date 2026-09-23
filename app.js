@@ -489,12 +489,13 @@ function renderTimeline(item, logs) {
       ? `<div class="tl-photos">${photos.map(p => `
           <figure>
             <img src="${esc(p.photo_url)}" alt="" onerror="this.style.visibility='hidden'">
-            ${p.photo_description ? `<figcaption>${esc(p.photo_description)}</figcaption>` : ''}
+            ${(p.recorder_name || p.photo_description)
+              ? `<figcaption>${esc([p.recorder_name, p.photo_description].filter(Boolean).join(' · '))}</figcaption>` : ''}
           </figure>`).join('')}</div>`
       : '';
     const extra = [
       l.issues_found ? `<div class="tl-extra"><b>發現問題：</b>${esc(l.issues_found)}</div>` : '',
-      l.resolution ? `<div class="tl-extra"><b>解決方案：</b>${esc(l.resolution)}</div>` : '',
+      l.resolution ? `<div class="tl-extra"><b>待辦事項 / 下一步：</b>${esc(l.resolution)}</div>` : '',
       l.notes ? `<div class="tl-extra"><b>備註：</b>${esc(l.notes)}</div>` : ''
     ].join('');
 
@@ -507,6 +508,7 @@ function renderTimeline(item, logs) {
           ? `<span class="chip ${STATUS_CLS[l.progress_status] || ''}">${esc(stLabel[l.progress_status] || '')}</span>`
           : ''}
         ${l.location ? `<span class="chip">${esc(l.location)}</span>` : ''}
+        ${l.recorder_name ? `<span class="chip">紀錄：${esc(l.recorder_name)}</span>` : ''}
         <span class="chip">${photos.length} 張</span>
       </div>
       ${l.main_description ? `<div class="tl-desc">${esc(l.main_description)}</div>` : ''}

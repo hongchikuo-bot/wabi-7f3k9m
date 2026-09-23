@@ -113,6 +113,18 @@
             font-size: 0.9rem;
         }
 
+        /* 紀錄人（誰上傳的） */
+        .log-by {
+            display: block;
+            font-size: 0.75rem;
+            color: #8a8070;
+            margin-top: 0.15rem;
+        }
+        .progress-by {
+            font-size: 0.75rem;
+            color: #8a8070;
+        }
+
         .log-location {
             font-weight: 500;
             display: block;
@@ -358,16 +370,23 @@
         const PLACEHOLDER_MODAL = 'https://via.placeholder.com/800x600?text=No+Image';
 
         // 狀態標籤（公開頁不顯示專案費用與負責人）
-        const STATUS_LABEL = { completed: '已完成', in_progress: '進行中', paused: '暫停' };
-        const STATUS_CLASS = { completed: 'done', in_progress: 'doing', paused: 'paused' };
+        const STATUS_LABEL = { '': '開案', completed: '已完成', in_progress: '進行中', paused: '暫停' };
+        const STATUS_CLASS = { '': 'opened', completed: 'done', in_progress: 'doing', paused: 'paused' };
 
-        // 公開頁只讀「公開視圖」—— 底層表對匿名是鎖住的（RLS）
+        // 紀錄人是後加的欄位，公開頁用「外掛視圖」讀（v_public_logs_ext / v_public_photos_ext）。
+        // SQL 還沒跑的話就自動退回原本的視圖（只是不會顯示紀錄人）—— 不會壞掉，也不需要偵測。
         async function fetchLogs() {
-            const [logsRes, photosRes] = await Promise.all([
-                supabaseClient.from('v_public_logs').select('*').order('log_date', { ascending: false }),
-                supabaseClient.from('v_public_photos').select('*')
-            ]);
-
+            async function pull(logsView, photosView) {
+                const [l, p] = await Promise.all([
+                    supabaseClient.from(logsView).select('*').order('log_date', { ascending: false }),
+                    supabaseClient.from(photosView).select('*')
+                ]);
+                return { l, p };
+            }
+            let { l: logsRes, p: photosRes } = await pull('v_public_logs_ext', 'v_public_photos_ext');
+            if (logsRes.error || photosRes.error) {
+                ({ l: logsRes, p: photosRes } = await pull('v_public_logs', 'v_public_photos'));
+            }
             if (logsRes.error || photosRes.error) {
                 console.error('Error fetching logs:', logsRes.error || photosRes.error);
                 const msg = '<div class="loading">讀取失敗，請稍後再試。</div>';
@@ -440,7 +459,8 @@
                                     </div>
                                     <div class="log-info">
                                         <span class="log-location">${esc(log.node_name || log.location) || '未標記位置'}</span>
-                                        <span class="log-status">${esc(STATUS_LABEL[log.progress_status] || '')}</span>
+                                        <span class="log-status">${esc(STATUS_LABEL[log.item_status || log.progress_status] || '')}</span>
+                                        ${log.recorder_name ? `<span class="log-by">紀錄：${esc(log.recorder_name)}</span>` : ''}
                                     </div>
                                 </div>`;
                 }).join('');
@@ -482,6 +502,8 @@
                 const stLabel = STATUS_LABEL[st] || '未設定';
                 const stCls = STATUS_CLASS[st] || '';
 
+                // 這個案子有幾個人做過（同一案件可能由不同紀錄人上傳）
+                const byNames = [...new Set(sorted.map(x => x.recorder_name).filter(Boolean))];
                 let shots = 0;
                 const cells = [];
                 sorted.forEach((log, i) => {
@@ -490,7 +512,9 @@
                               : (multi && i === sorted.length - 1 ? '<span class="tag latest">最新</span>' : '');
                     log.photos.forEach(ph => {
                         shots++;
-                        const cap = [log.log_date, ph.photo_description].filter(Boolean).join(' · ');
+                        // 照片上標明是誰拍的／誰做的（補拍會讓不同人加到同一筆紀錄）
+                        const cap = [log.log_date, ph.recorder_name || log.recorder_name,
+                                     ph.photo_description].filter(Boolean).join(' · ');
                         cells.push(`<figure class="shot" onclick="showDetailById('${esc(log.id)}')">
                             ${tag}
                             <img src="${esc(ph.photo_url)}" loading="lazy" alt="">
@@ -504,6 +528,7 @@
                         <span class="progress-title">${esc(title)}</span>
                         <span class="chip ${stCls}">${esc(stLabel)}</span>
                         ${loc ? `<span class="progress-loc">${esc(loc)}</span>` : ''}
+                        ${byNames.length ? `<span class="progress-by">${esc(byNames.join('、'))}</span>` : ''}
                         <span class="progress-count">${sorted.length} 筆紀錄 · ${shots} 張照片</span>
                     </div>
                     <div class="strip">${cells.join('')}</div>
@@ -527,21 +552,26 @@
             if (!modalShots) return;
 
             // 一筆紀錄可能有多張照片，全部列出來
+            // 每張標明是誰上傳的（補拍可以讓別人加到同一筆紀錄）
             const photos = (log.photos && log.photos.length) ? log.photos : [{}];
-            modalShots.innerHTML = photos.map(ph => `
+            modalShots.innerHTML = photos.map(ph => {
+                const cap = [ph.recorder_name, ph.photo_description].filter(Boolean).join(' · ');
+                return `
                         <figure class="modal-shot">
                             <img src="${esc(ph.photo_url) || PLACEHOLDER_MODAL}" alt="">
-                            ${ph.photo_description ? `<figcaption>${esc(ph.photo_description)}</figcaption>` : ''}
-                        </figure>`).join('');
+                            ${cap ? `<figcaption>${esc(cap)}</figcaption>` : ''}
+                        </figure>`;
+            }).join('');
 
             const fields = {
                 '項目': log.item_title,
                 '位置': log.node_name || log.location,
                 '狀態': STATUS_LABEL[log.item_status || log.progress_status] || '',
                 '時間': `${log.log_date || ''} ${log.log_time || ''}`.trim(),
+                '紀錄人': log.recorder_name,
                 '主描述': log.main_description,
                 '發現問題': log.issues_found || '無',
-                '解決方案': log.resolution || '無',
+                '待辦事項 / 下一步': log.resolution || '無',
                 '備註': log.notes
             };
 

@@ -135,6 +135,9 @@
         .entry .title { font-weight: 600; font-size: 14px; }
         .entry .meta { font-size: 12px; color: var(--color-muted); }
         .entry .desc { font-size: 13px; margin-top: 4px; word-break: break-word; }
+        /* 紀錄人（誰上傳的） */
+        .entry .recorder { font-size: 11.5px; color: #9a8a68; margin-top: 3px; }
+        .photo-item .pby { font-size: 10.5px; color: #8a7a5c; margin-top: 2px; }
         /* 未完成紀錄的待辦事項（來源：那筆紀錄的「待辦事項 / 下一步」欄位） */
         .entry .todo {
             margin-top: 6px; padding: 6px 9px; border-radius: 4px;
@@ -390,12 +393,18 @@
             $('accountCard').classList.remove('hidden');
             $('listCard').classList.remove('hidden');
             const { data: { user } } = await supabase.auth.getUser();
-            $('whoami').textContent = (user && user.email) || '';
             await probeTakenAt();
-            if (!HAS_TAKEN_AT) {
-                say('formMsg', 'ℹ️ 照片的「拍攝日期」功能還沒啟用：資料庫缺 log_photos.taken_at 欄位。\n'
-                    + '其他功能都正常。跑一次 private-docs/sql/add-log-photos-taken-at.sql，'
-                    + '重新整理後就會自動啟用。', 'info');
+            await probeRecorder();
+            await fetchMyName();
+            $('whoami').textContent = MY_NAME
+                ? `${MY_NAME}（${(user && user.email) || ''}）`
+                : ((user && user.email) || '');
+            const missing = [];
+            if (!HAS_TAKEN_AT) missing.push('照片的「拍攝日期」（缺 log_photos.taken_at）');
+            if (!HAS_RECORDER) missing.push('「紀錄人」（缺 project_logs.recorder_name 與公開頁的外掛視圖）');
+            if (missing.length) {
+                say('formMsg', 'ℹ️ 還沒啟用的功能：' + missing.join('、')
+                    + '。\n其他功能都正常；跑一次 private-docs/sql 裡的 SQL，重新整理後就會自動啟用。', 'info');
             }
             await loadProjects();
             await loadEntries();
@@ -721,6 +730,39 @@
             const c = { ...r }; delete c.taken_at; return c;
         });
 
+        // ---------- 紀錄人（誰上傳的）----------
+        // 需要先在資料庫加欄位（見 private-docs/sql/add-recorder-name.sql）。
+        // 每人一個帳號 → 自動帶入登入者的名字，紀錄的人不用手動選。
+        let HAS_RECORDER = false;
+        let MY_NAME = '';
+
+        async function probeRecorder() {
+            // 有任何錯誤都當成「還沒有這個欄位」
+            const { error } = await supabase.from('project_logs').select('recorder_name').limit(0);
+            HAS_RECORDER = !error;
+            return HAS_RECORDER;
+        }
+
+        // 自己的顯示名稱（profiles 的 SELECT 政策允許讀「本人」）
+        async function fetchMyName() {
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!user) return '';
+                const { data } = await supabase.from('profiles')
+                    .select('display_name').eq('id', user.id).maybeSingle();
+                MY_NAME = (data && data.display_name)
+                    || String(user.email || '').split('@')[0] || '';
+            } catch (err) {
+                MY_NAME = '';
+            }
+            return MY_NAME;
+        }
+
+        // 欄位還不存在時，把 recorder_name 從 payload 拿掉
+        const stripRec = rows => HAS_RECORDER ? rows : rows.map(r => {
+            const c = { ...r }; delete c.recorder_name; return c;
+        });
+
         // 依拍攝日期重算某筆紀錄所有照片的 sort_order。
         // 沒填日期的照片＝視為「紀錄當天拍的」。
         // 排序鍵：拍攝日期 → 上傳時間 → 檔名裡的毫秒 → 舊的 sort_order
@@ -909,7 +951,8 @@
             const base = count || 0;
 
             const { error } = await supabase.from('log_photos').insert(
-                stripTa(photos.map((p, i) => ({ ...p, log_id: APPEND_TARGET.id, sort_order: base + i })))
+                stripRec(stripTa(photos.map((p, i) =>
+                    ({ ...p, log_id: APPEND_TARGET.id, sort_order: base + i, recorder_name: MY_NAME || null }))))
             );
             if (error) {
                 $('submitBtn').disabled = false;
@@ -997,6 +1040,8 @@
             // 留空時「不要送這個欄位」，讓資料庫套用預設值。送 null 會違反 NOT NULL。
             const logTime = $('log_time').value;
             if (logTime) payload.log_time = logTime;
+            // 紀錄人：自動帶入登入者的名字（每人一個帳號）
+            if (HAS_RECORDER) payload.recorder_name = MY_NAME || null;
 
             // 先上傳檔案照片：失敗就停住，不留半筆紀錄
             let filePhotos = [];
@@ -1039,7 +1084,8 @@
 
             if (photos.length) {
                 const { error: pErr } = await supabase.from('log_photos')
-                    .insert(stripTa(photos.map((p, i) => ({ ...p, log_id: log.id, sort_order: i }))));
+                    .insert(stripRec(stripTa(photos.map((p, i) =>
+                        ({ ...p, log_id: log.id, sort_order: i, recorder_name: MY_NAME || null })))));
                 if (pErr) {
                     $('submitBtn').disabled = false;
                     return say('formMsg',
@@ -1099,11 +1145,14 @@
         let savingEdit = false;
 
         async function loadEntries() {
+            const recCol = HAS_RECORDER ? ', recorder_name' : '';
+            const photoCols = 'id, photo_url, photo_description, sort_order, taken_at'
+                + (HAS_RECORDER ? ', recorder_name' : '');
             const { data, error } = await supabase
                 .from('project_logs')
                 .select('id, log_date, log_time, location, main_description, progress_status, '
-                       + 'issues_found, resolution, notes, project_id, item_id, node_id, created_at, '
-                       + 'log_photos(id, photo_url, photo_description, sort_order, taken_at), '
+                       + 'issues_found, resolution, notes, project_id, item_id, node_id, created_at'
+                       + recCol + ', log_photos(' + photoCols + '), '
                        + 'items(title, work_type, status, created_at)')
                 .order('log_date', { ascending: false })
                 .limit(300);
@@ -1204,6 +1253,8 @@
                 // 待辦事項：未完成的紀錄才顯示（一行一項）
                 const todoLines = String(e.resolution || '').split('\n')
                     .map(s => s.trim()).filter(Boolean);
+                // 紀錄人（誰上傳的這筆紀錄）
+                const recName = HAS_RECORDER ? String(e.recorder_name || '').trim() : '';
                 const todoHtml = (entryRank(e) === 0 && todoLines.length)
                     ? `<div class="todo"><span class="todo-head">待辦 ${todoLines.length} 項</span>`
                         + todoLines.map(x => `<div class="todo-item">・${esc(x)}</div>`).join('')
@@ -1215,6 +1266,7 @@
                     <div class="body">
                         <div class="title">${esc(e.log_date)} · ${esc(e.location || '未標記位置')}</div>
                         <div class="meta">${esc(metaBits.join(' · '))}</div>
+                        ${recName ? `<div class="recorder">紀錄：${esc(recName)}</div>` : ''}
                         <div class="desc">${esc(e.main_description || '')}</div>
                         ${todoHtml}
                         ${editingEntryId === e.id ? renderEditForm(e) : ''}
@@ -1281,6 +1333,8 @@
                 ? `<div class="photo-grid" id="ee-photo-grid">${photos.map(p => `
                     <div class="photo-item">
                         <img src="${esc(p.photo_url)}" alt="" onerror="this.style.visibility='hidden'">
+                        ${(HAS_RECORDER && p.recorder_name)
+                            ? `<div class="pby">${esc(p.recorder_name)}</div>` : ''}
                         <input type="date" data-photo-taken="${esc(p.id)}" value="${esc(p.taken_at || '')}"
                                title="這張照片的拍攝日期（留空＝這筆紀錄的日期）">
                         <div class="pdesc">${esc(p.photo_description || '（無描述）')}</div>
@@ -1545,7 +1599,8 @@
                     .select('id', { count: 'exact', head: true }).eq('log_id', id);
                 const base = count || 0;
                 const { error: pErr } = await supabase.from('log_photos')
-                    .insert(stripTa(newPhotos.map((p, i) => ({ ...p, log_id: id, sort_order: base + i }))));
+                    .insert(stripRec(stripTa(newPhotos.map((p, i) =>
+                        ({ ...p, log_id: id, sort_order: base + i, recorder_name: MY_NAME || null })))));
                 photoNote = pErr
                     ? `（但 ${newPhotos.length} 張新照片寫入失敗：${pErr.message}）`
                     : `，追加 ${newPhotos.length} 張（拍攝日期 ${batchDate || '未填'}）`;
