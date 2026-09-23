@@ -190,6 +190,7 @@
         .it-title { font-size: 1rem; font-weight: 500; }
         .it-meta { flex-basis: 100%; font-size: 0.75rem; color: var(--color-muted); }
         .it-meta-short { display: none; }
+        .it-open { margin-left: auto; font-size: 0.78rem; color: var(--color-accent); opacity: 0.85; white-space: nowrap; }
         .it-caret { font-size: 0.75rem; color: var(--color-muted); }
         .item-row.open .it-caret { transform: rotate(90deg); }
         .item-body { display: none; padding: 0.4rem 0.2rem 1.2rem 0.6rem; }
@@ -251,6 +252,27 @@
             .todos { padding: 0.4rem 0.35rem; }
             .todo-row { font-size: 0.78rem; gap: 0.25rem; }
         }
+
+        /* ---------------- 點工項 → 全寬浮層（欄位只有 ~250px，展開編輯看不清）---------------- */
+        #sheet {
+            display: none; position: fixed; inset: 0; z-index: 950;
+            background: rgba(61, 53, 45, 0.45); padding: 1.2rem 0.8rem; overflow-y: auto;
+        }
+        #sheet.open { display: block; }
+        .sheet-box {
+            background: var(--color-card); border-radius: 8px;
+            max-width: 720px; margin: 0 auto; padding: 1.1rem 1.2rem 1.6rem;
+        }
+        .sheet-head { display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.7rem; flex-wrap: wrap; }
+        .sheet-title { font-size: 1.15rem; font-weight: 500; }
+        .sheet-loc { font-size: 0.9rem; color: var(--color-accent); opacity: 0.8; }
+        .sheet-close {
+            margin-left: auto; border: none; background: none; cursor: pointer;
+            font-size: 1.4rem; line-height: 1; color: var(--color-muted);
+        }
+        .sheet-meta { font-size: 0.8rem; color: var(--color-muted); margin-bottom: 1rem; }
+        .sheet-box .rec-desc { font-size: 1rem; }
+        .sheet-box .photo-row input { font-size: 0.95rem; }
 
         /* 在編輯表單裡追加照片 */
         .edit-block .add-photo-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
@@ -449,6 +471,10 @@
             <button id="changePwBtn">修改密碼</button>
         </div>
     </main>
+
+    <div id="sheet">
+        <div class="sheet-box" id="sheetBox"></div>
+    </div>
 
     <script src="board.js"></script>
     <script type="module">
@@ -1472,12 +1498,82 @@
                     ${it.status !== '_loose'
                         ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`
                         : ''}
-                    <span class="it-caret">▸</span>
+                    <span class="it-open">看內容/編輯 ▸</span>
                     <div class="it-meta">${esc(meta.join(' · '))}</div>
                     <div class="it-meta-short">${esc(short)}</div>
                 </div>
-                <div class="item-body">${todoBlock(it)}${it.logs.map(boardRecord).join('')}</div>
             </div>`;
+        }
+
+        // ---------- 點工項 → 全寬浮層（看板只當總覽；內容與編輯都在浮層裡）----------
+        // 為什麼：四欄的每一欄只有 ~250px（手機 ~105px），展開後字太小、表單也不好填。
+        let LAST_BOARD = [];     // buildTree 的結果（找工項用）
+        let OPEN_ITEM = null;    // 浮層目前開在哪個工項
+        let SHRINKING = false;   // 正在壓縮中（避免重複觸發）
+
+        function findBoardItem(itemId) {
+            for (const g of LAST_BOARD) {
+                const it = g.items.find(x => x.itemId === itemId);
+                if (it) return it;
+            }
+            return null;
+        }
+
+        function findItemByEntry(entryId) {
+            for (const g of LAST_BOARD) {
+                for (const it of g.items) {
+                    if (it.logs.some(l => l.src && l.src.id === entryId)) return it;
+                }
+            }
+            return null;
+        }
+
+        function sheetHtml(it) {
+            const meta = [
+                it.opening ? fmtMonthDay(it.opening) + ' 開案' : '',
+                it.days !== null && it.status !== 'completed' ? '已 ' + it.days + ' 天' : '',
+                it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片',
+                it.byNames.length ? it.byNames.join('、') : '',
+            ].filter(Boolean).join(' · ');
+            return `
+                <div class="sheet-head">
+                    <span class="sheet-title">${esc(it.title)}</span>
+                    ${it.loc ? `<span class="sheet-loc">${esc(it.loc)}</span>` : ''}
+                    ${it.status !== '_loose'
+                        ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`
+                        : ''}
+                    <button type="button" class="sheet-close" title="關閉">&times;</button>
+                </div>
+                <div class="sheet-meta">${esc(meta)}</div>
+                ${todoBlock(it)}
+                ${it.logs.map(boardRecord).join('')}`;
+        }
+
+        function openItemSheet(itemId) {
+            const box = $('sheetBox');
+            const it = findBoardItem(itemId);
+            if (!box || !it) return;
+            OPEN_ITEM = itemId;
+            box.innerHTML = sheetHtml(it);
+            const sheet = $('sheet');
+            if (sheet) sheet.classList.add('open');
+            bindEntryActions(box);
+        }
+
+        function closeItemSheet() {
+            OPEN_ITEM = null;
+            const sheet = $('sheet');
+            if (sheet) sheet.classList.remove('open');
+        }
+
+        function refreshSheet() {
+            if (!OPEN_ITEM) return;
+            const it = findBoardItem(OPEN_ITEM);
+            if (!it) return closeItemSheet();
+            const box = $('sheetBox');
+            if (!box) return;
+            box.innerHTML = sheetHtml(it);
+            bindEntryActions(box);
         }
 
         function renderEntries() {
@@ -1487,6 +1583,7 @@
                 return;
             }
             const groups = buildTree(entryList.map(entryToLog));
+            LAST_BOARD = groups;
             box.innerHTML = `<div class="tree">${groups.map(g => `
                 <div class="grp${COLLAPSED_BY_DEFAULT[g.status] ? ' collapsed' : ''}">
                     <div class="grp-head" data-grp-head>
@@ -1501,24 +1598,23 @@
 
             box.querySelectorAll('[data-grp-head]').forEach(h =>
                 h.onclick = () => h.closest('.grp').classList.toggle('collapsed'));
+            // 點工項 → 開全寬浮層（不再就地展開：欄位太窄）
             box.querySelectorAll('[data-item-head]').forEach(h =>
-                h.onclick = () => h.closest('.item-row').classList.toggle('open'));
+                h.onclick = () => openItemSheet(h.closest('.item-row').getAttribute('data-item')));
 
-            // 正在編輯的那一筆 → 自動展開它所屬的工項並捲到它（不然會找不到表單）
+            // 正在編輯的那一筆 → 自動把它所屬工項的浮層打開（不然找不到表單）
             if (editingEntryId) {
-                box.querySelectorAll('.item-row').forEach(row => {
-                    if (row.querySelector(`[data-edit="${editingEntryId}"]`)) {
-                        row.classList.add('open');
-                        const g = row.closest('.grp');
-                        if (g) g.classList.remove('collapsed');
-                        row.scrollIntoView({ block: 'center' });
-                    }
-                });
+                const it = findItemByEntry(editingEntryId);
+                if (it) openItemSheet(it.itemId);
+            } else {
+                refreshSheet();
             }
             bindEntryActions(box);
         }
 
         function bindEntryActions(box) {
+            const sheetClose = box.querySelector && box.querySelector('.sheet-close');
+            if (sheetClose) sheetClose.onclick = () => closeItemSheet();
             box.querySelectorAll('[data-todo]').forEach(cb => {
                 cb.onchange = () => toggleTodo(cb.getAttribute('data-todo'), cb.checked);
             });
@@ -1909,7 +2005,6 @@
         // ---------- 既有的大照片：一次性自動壓縮（不用常駐按鈕）----------
         // 只在第一次登入時問一次；問過就記在 localStorage，不再打擾。
         const SHRINK_ASKED = 'wabi-shrink-asked-v1';
-        let SHRINKING = false;   // 正在壓縮中（避免重複觸發）
 
         async function offerShrinkOnce() {
             let asked = null;
@@ -2099,6 +2194,9 @@
         $('saveNameBtn').onclick = saveDisplayName;
         $('reorderBtn').onclick = reorderAllPhotos;
         $('formHead').onclick = () => setFormOpen();   // 點標題 → 展開／收起
+        // 浮層：點背景或按 Esc 關閉
+        $('sheet').onclick = e => { if (e.target && e.target.id === 'sheet') closeItemSheet(); };
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeItemSheet(); });
         $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); showLogin(); };
 
         // 換專案 → 重載該專案的地點與工項，並清掉上一個專案的「最新紀錄」面板
