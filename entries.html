@@ -2409,7 +2409,7 @@
             if (itemId && complete && $('ee-maintenance') && $('ee-maintenance').checked) {
                 const already = TODOS.some(t => t.item_id === itemId && t.maint && !t.done);
                 if (!already) {
-                    const name = ($('ee-maint-name') && $('ee-maint-name').value.trim()) || curWT || '長期維修';
+                    const name = ($('ee-maint-name') && $('ee-maint-name').value.trim()) || wt || '長期維修';
                     const nextMaint = $('ee-next-maint') ? ($('ee-next-maint').value || null) : null;
                     const { error: mErr } = await supabase.from('item_todos')
                         .insert([{ item_id: itemId, project_id: e.project_id, text: name, done: false,
