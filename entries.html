@@ -1846,6 +1846,7 @@
                     <span class="maint-card-name" data-maint-name="${esc(t.id)}" title="點一下改名">🔧 ${esc(t.text)}</span>
                     <span class="maint-card-next">下次 ${esc(nextStr)}</span>
                     <input type="date" class="maint-next" data-maint-next="${esc(t.id)}" value="${esc(t.next_maint_at || '')}" title="下次維修時間">
+                    <span class="it-open">看內容/編輯 ▸</span>
                     ${itemName ? `<span class="maint-card-owner">${esc(itemName)}</span>` : ''}
                 </div>
             </div>`;
