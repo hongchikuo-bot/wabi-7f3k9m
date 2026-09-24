@@ -236,6 +236,13 @@
         .maint-card.overdue .maint-card-next { color: #8b2e2e; }
         .maint-card .maint-next { width: auto; font-size: 0.72rem; padding: 0.05rem 0.2rem; border: 1px solid var(--color-line); border-radius: 4px; }
         .maint-card-owner { font-size: 0.7rem; color: var(--color-muted); }
+        /* 維修浮層 */
+        .maint-sheet-body { padding: 0.8rem 0; }
+        .maint-sheet-body input[type=text], .maint-sheet-body input[type=date] {
+            width: 100%; margin-top: 4px;
+        }
+        .maint-sheet-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 14px; }
+        .maint-sheet-actions button { width: auto; }
 
         .it-caret { font-size: 0.75rem; color: var(--color-muted); }
         .item-row.open .it-caret { transform: rotate(90deg); }
@@ -1833,7 +1840,7 @@
             const u = maintUrgency(t);
             const nextStr = t.next_maint_at ? fmtMonthDay(t.next_maint_at) : '待填';
             const itemName = itemNameOf(t.item_id);
-            return `<div class="maint-card${u ? ' ' + u : ''}" data-item="${esc(t.item_id)}">
+            return `<div class="maint-card${u ? ' ' + u : ''}" data-maint="${esc(t.id)}">
                 <div class="maint-card-head" data-item-head>
                     <input type="checkbox" data-todo="${esc(t.id)}" title="勾掉＝這次維修做完了（會自動生成下一個）">
                     <span class="maint-card-name" data-maint-name="${esc(t.id)}" title="點一下改名">🔧 ${esc(t.text)}</span>
@@ -1938,6 +1945,57 @@
             bindEntryActions(box);
         }
 
+        // ---------- 維修待辦自己的浮層（點維修卡 → 進來改名稱／時間／勾掉完成）----------
+        function maintSheetHtml(t) {
+            const itemName = itemNameOf(t.item_id);
+            const u = maintUrgency(t);
+            const uLabel = u === 'overdue' ? '（已逾期）' : (u === 'soon' ? '（快到期）' : '');
+            return `
+                <div class="sheet-head">
+                    <span class="sheet-title">🔧 ${esc(t.text)}</span>
+                    ${itemName ? `<span class="sheet-loc">${esc(itemName)}</span>` : ''}
+                    <span class="chip ${u === 'overdue' ? 'paused' : (u === 'soon' ? 'doing' : 'opened')}">維修${uLabel}</span>
+                    <button type="button" class="sheet-close" title="關閉">&times;</button>
+                </div>
+                <div class="maint-sheet-body">
+                    <label>維修名稱</label>
+                    <input type="text" id="maint-sheet-name" value="${esc(t.text)}">
+                    <label style="margin-top:10px;">下次維修時間</label>
+                    <input type="date" id="maint-sheet-next" value="${esc(t.next_maint_at || '')}">
+                    ${t.prev_done_at ? `<div class="hint">上次完成：${esc(fmtMonthDay(t.prev_done_at))}</div>` : ''}
+                    <div class="maint-sheet-actions">
+                        <button type="button" class="primary small" data-maint-save="${esc(t.id)}">儲存</button>
+                        <button type="button" class="ghost small" data-maint-done="${esc(t.id)}">✓ 這次維修完成（生成下一個）</button>
+                        <button type="button" class="danger small" data-maint-del="${esc(t.id)}">刪除</button>
+                    </div>
+                </div>`;
+        }
+
+        function openMaintSheet(todoId) {
+            const box = $('sheetBox');
+            const t = TODOS.find(x => x.id === todoId);
+            if (!box || !t) return;
+            OPEN_ITEM = null;   // 維修浮層不綁某個工項
+            box.innerHTML = maintSheetHtml(t);
+            const sheet = $('sheet');
+            if (sheet) sheet.classList.add('open');
+            bindEntryActions(box);
+        }
+
+        // 儲存維修名稱＋下次時間
+        async function saveMaintSheet(todoId) {
+            const name = ($('maint-sheet-name') ? $('maint-sheet-name').value.trim() : '') || '長期維修';
+            const next = $('maint-sheet-next') ? ($('maint-sheet-next').value || null) : null;
+            const { error } = await supabase.from('item_todos')
+                .update({ text: name, next_maint_at: next }).eq('id', todoId).select('id');
+            if (error) return say('listMsg', '維修待辦儲存失敗：' + error.message, 'error');
+            const t = TODOS.find(x => x.id === todoId);
+            if (t) { t.text = name; t.next_maint_at = next; }
+            say('listMsg', '維修待辦已儲存', 'ok');
+            closeItemSheet();
+            renderEntries();
+        }
+
         // ---------- 費用編輯（在工項浮層裡就地改，不跳去後台）----------
         // 展開編輯表單的 HTML；平常是空的（按「改費用／填費用」才顯示）
         function costEditHtml(it) {
@@ -2033,8 +2091,10 @@
             box.querySelectorAll('[data-item-head]').forEach(h => {
                 h.onclick = ev => {
                     if (ev.target.closest('input, button, [data-maint-name]')) return;
-                    const card = h.closest('.item-row, .maint-card');
-                    if (card) openItemSheet(card.getAttribute('data-item'));
+                    const maintCard = h.closest('.maint-card');
+                    if (maintCard) return openMaintSheet(maintCard.getAttribute('data-maint'));
+                    const itemCard = h.closest('.item-row');
+                    if (itemCard) openItemSheet(itemCard.getAttribute('data-item'));
                 };
             });
             // 維修卡改名（點名稱）
@@ -2077,6 +2137,22 @@
             });
             box.querySelectorAll('[data-cost-cancel]').forEach(btn => {
                 btn.onclick = () => toggleCostEdit(btn.getAttribute('data-cost-cancel'));
+            });
+            // 維修浮層：儲存／這次完成／刪除
+            box.querySelectorAll('[data-maint-save]').forEach(btn => {
+                btn.onclick = () => saveMaintSheet(btn.getAttribute('data-maint-save'));
+            });
+            box.querySelectorAll('[data-maint-done]').forEach(btn => {
+                btn.onclick = async () => {
+                    await toggleTodo(btn.getAttribute('data-maint-done'), true);
+                    closeItemSheet();   // 完成後關閉浮層，回看板看生成的下一個
+                };
+            });
+            box.querySelectorAll('[data-maint-del]').forEach(btn => {
+                btn.onclick = async () => {
+                    await deleteTodo(btn.getAttribute('data-maint-del'));
+                    closeItemSheet();
+                };
             });
             const cancel = box.querySelector('[data-cancel-edit]');
             if (cancel) cancel.onclick = () => {
