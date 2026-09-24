@@ -203,6 +203,13 @@
         .cost-edit-grid label { font-size: 0.78rem; color: var(--color-accent); display: flex; flex-direction: column; gap: 0.25rem; }
         .cost-edit-actions { display: flex; gap: 0.5rem; }
         .cost-edit-actions button { width: auto; }
+        /* 長期維修行（待辦區）：快到＝黃、逾期＝紅 */
+        .maint-row {
+            font-size: 0.82rem; padding: 0.35rem 0.6rem; border-radius: 6px;
+            background: #f0ebe1; color: var(--color-accent); margin: 0.3rem 0;
+        }
+        .maint-row.soon { background: #fff3cd; color: #7a5c1e; font-weight: 500; }
+        .maint-row.overdue { background: #f8d7da; color: #8b2e2e; font-weight: 600; }
 
         .it-caret { font-size: 0.75rem; color: var(--color-muted); }
         .item-row.open .it-caret { transform: rotate(90deg); }
@@ -410,6 +417,18 @@
                     <span>這次拍攝後，這個工項<strong>已完成</strong></span>
                 </label>
                 <div class="hint">勾選後，會自動把「這個地點的這個工項」狀態改成「已完成」（進度以進度卡為準）。</div>
+
+                <!-- 長期維修：勾「已完成」後才出現；勾了再出現「下次維修時間」 -->
+                <div id="maintenanceWrap" style="display:none; margin-top:10px; padding:10px; border:1px dashed var(--color-line); border-radius:6px;">
+                    <label class="check-line">
+                        <input type="checkbox" id="mark_maintenance">
+                        <span>完工後有<strong>長期維修</strong>需求</span>
+                    </label>
+                    <div id="maintenanceDateWrap" style="display:none; margin-top:8px;">
+                        <label>下次維修時間</label>
+                        <input type="date" id="next_maintenance_at">
+                    </div>
+                </div>
             </div>
 
             <div class="form-group">
@@ -820,6 +839,22 @@
             const hasWT = !!($('work_type') && $('work_type').value.trim());
             $('completeWrap').style.display = hasWT ? 'block' : 'none';
             if (!hasWT) $('mark_complete').checked = false;
+            syncMaintenance();
+        }
+
+        // 長期維修選項：勾「已完成」才顯示；勾「長期維修」才顯示日期欄
+        function syncMaintenance() {
+            const completeWrap = $('completeWrap');
+            const maintWrap = $('maintenanceWrap');
+            const dateWrap = $('maintenanceDateWrap');
+            const markComplete = $('mark_complete');
+            const markMaint = $('mark_maintenance');
+            if (!maintWrap || !dateWrap || !markComplete || !markMaint) return;
+            const showMaint = completeWrap.style.display !== 'none' && markComplete.checked;
+            maintWrap.style.display = showMaint ? 'block' : 'none';
+            if (!showMaint) markMaint.checked = false;
+            dateWrap.style.display = (showMaint && markMaint.checked) ? 'block' : 'none';
+            if (!markMaint.checked) $('next_maintenance_at').value = '';
         }
 
         // ---------- 照片：檔案（拍照 / 選檔 / 拖放）----------
@@ -1271,10 +1306,21 @@
             // 勾了「這次拍攝後已完成」→ 順手把進度卡結案
             let extra = '', hadErr = false;
             if (itemId && markComplete) {
-                const { error: ue } = await supabase.from('items')
-                    .update({ status: 'completed' }).eq('id', itemId);
+                const doMaintenance = !!($('mark_maintenance') && $('mark_maintenance').checked);
+                const nextMaint = doMaintenance
+                    ? ($('next_maintenance_at') ? $('next_maintenance_at').value || null : null)
+                    : null;
+                const upd = { status: 'completed' };
+                if (doMaintenance) upd.maintenance = true;
+                upd.next_maintenance_at = nextMaint;
+                const { error: ue } = await supabase.from('items').update(upd).eq('id', itemId);
                 if (ue) { extra = `\n⚠️ 紀錄已存，但進度卡狀態更新失敗：${ue.message}`; hadErr = true; }
-                else extra = '，這個工項已標記為「已完成」';
+                else {
+                    extra = '，這個工項已標記為「已完成」';
+                    if (doMaintenance) extra += nextMaint
+                        ? `，並設為長期維修（下次 ${nextMaint}）`
+                        : '，並設為長期維修（下次維修時間待填）';
+                }
             }
 
             const where = NODE_PATHS.get(nodeId) || '';
@@ -1381,7 +1427,7 @@
                 .select('id, log_date, log_time, location, main_description, progress_status, '
                        + 'issues_found, resolution, notes, project_id, item_id, node_id, created_at'
                        + recCol + ', log_photos(' + photoCols + '), '
-                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status)')
+                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at)')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
@@ -1492,6 +1538,9 @@
                 fin: e.items ? e.items.final_cost : null,
                 paid: e.items ? e.items.paid_amount : null,
                 pay_status: e.items ? e.items.payment_status : null,
+                // 長期維修（掛在工項上）
+                maintenance: e.items ? !!e.items.maintenance : false,
+                next_maintenance_at: e.items ? e.items.next_maintenance_at : null,
             };
         }
 
@@ -1574,12 +1623,43 @@
         }
 
         function todoBlock(it) {
-            if (!HAS_TODOS || it.status === '_loose') return '';
+            if (it.status === '_loose') return '';
+            const last = it.logs && it.logs[it.logs.length - 1];
+            const m = maintenanceOf(last);
+            const hasTodos = HAS_TODOS;
+            if (!hasTodos && !m) return '';
+            const todoList = hasTodos ? todoListHtml(it.itemId) : '';
+            const addBtn = hasTodos
+                ? `<button type="button" class="ghost small" data-add-todo="${esc(it.itemId)}">＋ 新增待辦</button>`
+                : '';
+            // 維修行：快到/逾期 → 置頂（在待辦清單上面）；正常 → 待在待辦最下面
+            const maintTop = (m && m.urgent) ? m.html : '';
+            const maintBottom = (m && !m.urgent) ? m.html : '';
             return `<div class="todos">
                 <div class="todos-head">待辦事項</div>
-                ${todoListHtml(it.itemId)}
-                <button type="button" class="ghost small" data-add-todo="${esc(it.itemId)}">＋ 新增待辦</button>
+                ${maintTop}
+                ${todoList}
+                ${maintBottom}
+                ${addBtn}
             </div>`;
+        }
+
+        // 長期維修：掛在工項上的「下次維修時間」。
+        // 回 { html, urgent }；沒設維修回 null。urgent ＝ 逾期（紅）或 30 天內（黃）。
+        function maintenanceOf(last) {
+            if (!last || !last.src) return null;
+            if (!last.maintenance) return null;
+            const next = last.next_maintenance_at;
+            if (!next) {
+                return { urgent: false, html: '<div class="maint-row">🔧 長期維修（尚未設定下次時間）</div>' };
+            }
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const d = new Date(String(next).slice(0, 10) + 'T00:00:00');
+            const diffDays = Math.round((d - today) / 86400000);
+            const cls = diffDays < 0 ? 'overdue' : (diffDays <= 30 ? 'soon' : '');
+            const urgent = cls === 'overdue' || cls === 'soon';
+            const html = `<div class="maint-row${cls ? ' ' + cls : ''}">🔧 長期維修：下次 ${fmtMonthDay(next)}</div>`;
+            return { urgent, html };
         }
 
         // 新增紀錄表單裡的待辦區塊：同一份清單（勾選立即寫入）＋ 這次要新增的（送出才寫）
@@ -1919,6 +1999,8 @@
             const wtList = uniqSorted(((s && s.items) || []).map(workTypeOf));
             const done = !!(e.items && e.items.status === 'completed');
             const curStatus = done ? '' : ((e.items && e.items.status) || '');
+            const maintenance = !!(e.items && e.items.maintenance);
+            const nextMaintenance = (e.items && e.items.next_maintenance_at) || '';
             const photos = (e.log_photos || []).slice()
                 .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
             const photoHtml = photos.length
@@ -1970,6 +2052,19 @@
                     <option value="in_progress"${curStatus === 'in_progress' ? ' selected' : ''}>進行中</option>
                     <option value="paused"${curStatus === 'paused' ? ' selected' : ''}>暫停</option>
                 </select>
+
+                <!-- 長期維修：勾「已完成」後出現；勾了再出現日期欄 -->
+                <div id="ee-maint-wrap" style="display:none; margin-top:10px; padding:10px; border:1px dashed var(--color-line); border-radius:6px;">
+                    <label class="check-line" style="font-size:13px">
+                        <input type="checkbox" id="ee-maintenance"${maintenance ? ' checked' : ''}>
+                        <span>完工後有<strong>長期維修</strong>需求</span>
+                    </label>
+                    <div id="ee-maint-date-wrap" style="display:none; margin-top:8px;">
+                        <label>下次維修時間</label>
+                        <input type="date" id="ee-next-maint" value="${esc(nextMaintenance || '')}">
+                    </div>
+                </div>
+
                 <div class="hint">${curWT
                     ? '「開案 / 進行中 / 暫停」都是未完成；勾了上面的「已完成」就不用選。'
                     : '要能設定狀態，請先在上面填「工項」——狀態是記在進度卡上。'}</div>
@@ -2096,9 +2191,26 @@
             const cmp = box.querySelector('#ee-complete');
             const sel = box.querySelector('#ee-status');
             const wtInp = box.querySelector('#ee-worktype');
+            // 長期維修選項：勾「已完成」才顯示；勾「長期維修」才顯示日期欄
+            const maintWrap = box.querySelector('#ee-maint-wrap');
+            const maintDateWrap = box.querySelector('#ee-maint-date-wrap');
+            const maintChk = box.querySelector('#ee-maintenance');
             if (cmp && sel) {
-                const sync = () => { sel.disabled = cmp.checked || !(wtInp && wtInp.value.trim()); };
+                const syncStatus = () => { sel.disabled = cmp.checked || !(wtInp && wtInp.value.trim()); };
+                const syncMaint = () => {
+                    if (!maintWrap || !maintDateWrap || !maintChk) return;
+                    const show = cmp.checked;
+                    maintWrap.style.display = show ? 'block' : 'none';
+                    if (!show) maintChk.checked = false;
+                    maintDateWrap.style.display = (show && maintChk.checked) ? 'block' : 'none';
+                    if (!maintChk.checked) {
+                        const nm = box.querySelector('#ee-next-maint');
+                        if (nm) nm.value = '';
+                    }
+                };
+                const sync = () => { syncStatus(); syncMaint(); };
                 cmp.onchange = sync;
+                if (maintChk) maintChk.onchange = sync;
                 if (wtInp) wtInp.oninput = sync;
                 sync();
             }
@@ -2250,10 +2362,22 @@
             // ③ 進度卡的完成狀態（items.status 是唯一真相，公開頁面也讀這個）
             let statusNote = '';
             if (itemId) {
-                const { error: uErr } = await supabase.from('items')
-                    .update({ status: complete ? 'completed' : (statusChoice || null) }).eq('id', itemId);
+                const doMaint = complete && !!($('ee-maintenance') && $('ee-maintenance').checked);
+                const nextMaint = doMaint
+                    ? ($('ee-next-maint') ? $('ee-next-maint').value || null : null)
+                    : null;
+                const itemUpd = { status: complete ? 'completed' : (statusChoice || null) };
+                // 維修欄位：勾了就設；沒勾完成或取消維修 → 清掉維修標記與日期
+                itemUpd.maintenance = doMaint;
+                itemUpd.next_maintenance_at = doMaint ? nextMaint : null;
+                const { error: uErr } = await supabase.from('items').update(itemUpd).eq('id', itemId);
                 if (uErr) statusNote = `（但進度卡狀態更新失敗：${uErr.message}）`;
-                else statusNote = `，這個工項標記為「${statusText(statusChoice)}」`;
+                else {
+                    statusNote = `，這個工項標記為「${statusText(statusChoice)}」`;
+                    if (doMaint) statusNote += nextMaint
+                        ? `，設為長期維修（下次 ${nextMaint}）`
+                        : '，設為長期維修（下次維修時間待填）';
+                }
             }
 
             unlock();
@@ -2470,6 +2594,9 @@
             if ($('work_type')) $('work_type').value = '';
             await loadStructureOptions($('project_id').value);
         });
+        // 勾「已完成」→ 跳出「長期維修」選項；勾「長期維修」→ 跳出日期欄
+        $('mark_complete').addEventListener('change', () => syncMaintenance());
+        $('mark_maintenance').addEventListener('change', () => syncMaintenance());
         // 地點或工項改變 → 重新對應到那張進度卡（顯示目前狀態與最新紀錄）
         $('node_id').addEventListener('change', () => refreshPair());
         $('workTypePick').addEventListener('change', () => {
