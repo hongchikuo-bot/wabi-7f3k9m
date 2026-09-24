@@ -352,32 +352,6 @@
       <h2 id="projectTitle" class="project-title"></h2>
       <div id="costSummary"></div>
 
-      <!-- 預算（每個專案一筆：預估款 + 工程款 + 已付 + 備註；未付自動算） -->
-      <div class="card" style="margin-bottom:16px">
-        <h3><span class="step-num">💰</span>預算與付款</h3>
-        <p class="hint">每個工程一筆：<strong>預估款</strong>（含備註）、<strong>工程款</strong>、<strong>已付</strong>；未付＝工程款－已付。</p>
-        <div id="budgetSummary"></div>
-        <div class="inline-form" style="margin-top:12px; align-items:flex-end">
-          <div class="ef">
-            <label>預估款（NT$）</label>
-            <input type="number" id="budgetEstimate" min="0" step="1" placeholder="0">
-          </div>
-          <div class="ef">
-            <label>工程款（NT$）</label>
-            <input type="number" id="budgetBilled" min="0" step="1" placeholder="0">
-          </div>
-          <div class="ef">
-            <label>已付（NT$）</label>
-            <input type="number" id="budgetPaid" min="0" step="1" placeholder="0">
-          </div>
-          <div class="ef" style="flex:1 1 200px">
-            <label>備註（細節）</label>
-            <input type="text" id="budgetNotes" placeholder="例：含拆除清運、木作另計">
-          </div>
-          <button onclick="saveBudget()">儲存</button>
-        </div>
-      </div>
-
       <!-- ① 地點 -->
       <div class="card" style="margin-bottom:16px">
         <h3><span class="step-num">①</span>地點</h3>

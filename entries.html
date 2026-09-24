@@ -191,6 +191,19 @@
         .it-meta { flex-basis: 100%; font-size: 0.75rem; color: var(--color-muted); }
         .it-meta-short { display: none; }
         .it-open { margin-left: auto; font-size: 0.78rem; color: var(--color-accent); opacity: 0.85; white-space: nowrap; }
+        /* 費用（工項卡上的金額行） */
+        .it-cost { flex-basis: 100%; font-size: 0.75rem; color: var(--color-accent); }
+        .it-cost b { font-weight: 600; }
+        .it-cost .over { color: #8b2e2e; }
+        .it-cost .under { color: #2e6b2e; }
+        .sheet-cost { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+        .sheet-cost button { width: auto; }
+        .cost-edit { margin: 0.6rem 0; padding: 0.7rem; border: 1px dashed var(--color-line); border-radius: 6px; }
+        .cost-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
+        .cost-edit-grid label { font-size: 0.78rem; color: var(--color-accent); display: flex; flex-direction: column; gap: 0.25rem; }
+        .cost-edit-actions { display: flex; gap: 0.5rem; }
+        .cost-edit-actions button { width: auto; }
+
         .it-caret { font-size: 0.75rem; color: var(--color-muted); }
         .item-row.open .it-caret { transform: rotate(90deg); }
         .item-body { display: none; padding: 0.4rem 0.2rem 1.2rem 0.6rem; }
@@ -509,6 +522,18 @@
         const esc = v => (v === null || v === undefined) ? ''
             : String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
                        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+        // 金額：DB numeric 回來是字串，一律 Number()；整數不顯示小數
+        const money = v => {
+            if (v === null || v === undefined || v === '') return '';
+            const n = Number(v);
+            if (!isFinite(n)) return '';
+            const isInt = Math.abs(n - Math.round(n)) < 0.005;
+            return n.toLocaleString('zh-TW', {
+                minimumFractionDigits: isInt ? 0 : 2,
+                maximumFractionDigits: isInt ? 0 : 2
+            });
+        };
 
         function say(elId, text, type = 'error') {
             const el = $(elId);
@@ -1356,7 +1381,7 @@
                 .select('id, log_date, log_time, location, main_description, progress_status, '
                        + 'issues_found, resolution, notes, project_id, item_id, node_id, created_at'
                        + recCol + ', log_photos(' + photoCols + '), '
-                       + 'items(title, work_type, status, created_at)')
+                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status)')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
@@ -1462,11 +1487,35 @@
                 progress_status: e.progress_status,
                 main_description: e.main_description,
                 resolution: e.resolution,
+                // 費用（掛在工項上，從 items 帶出來；未付 = 工程款 - 已付，前端算）
+                est: e.items ? e.items.estimated_cost : null,
+                fin: e.items ? e.items.final_cost : null,
+                paid: e.items ? e.items.paid_amount : null,
+                pay_status: e.items ? e.items.payment_status : null,
             };
         }
 
         // 待辦事項只在「這個工項還沒完成」時顯示（做完了就不用再提醒）
         const todosShown = e => !(e.items && e.items.status === 'completed');
+
+        // 費用在工項卡上的摘要：預估款 · 工程款 · 已付 · 未付（未付＝工程款−已付）
+        // 只要三個數字有任何一個有填，就顯示一整行；全部空白才不顯示。
+        function costLine(est, fin, paid) {
+            const hasEst = est !== null && est !== undefined && est !== '';
+            const hasFin = fin !== null && fin !== undefined && fin !== '';
+            const hasPaid = paid !== null && paid !== undefined && paid !== '';
+            if (!hasEst && !hasFin && !hasPaid) return '';
+            const unpaid = (hasFin ? Number(fin) : 0) - (hasPaid ? Number(paid) : 0);
+            const parts = [];
+            if (hasEst) parts.push(`預估 <b>${money(est)}</b>`);
+            if (hasFin) parts.push(`工程款 <b>${money(fin)}</b>`);
+            if (hasPaid) parts.push(`已付 <b>${money(paid)}</b>`);
+            if (hasFin || hasPaid) {
+                const cls = unpaid > 0 ? 'over' : (unpaid < 0 ? 'under' : '');
+                parts.push(`未付 <b class="${cls}">${money(unpaid)}</b>`);
+            }
+            return parts.join(' · ');
+        }
 
         // 一筆紀錄（工項展開後看到的）
         function boardRecord(l) {
@@ -1625,6 +1674,9 @@
             meta.push(it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片');
             if (it.byNames.length) meta.push(it.byNames.join('、'));
             const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`;
+            // 費用（掛在工項上；同一工項每筆 log 的費用一樣，取最後一筆）
+            const last = it.logs && it.logs[it.logs.length - 1];
+            const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid) : '';
             return `<div class="item-row" data-item="${esc(it.itemId)}">
                 <div class="item-head" data-item-head>
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
@@ -1633,6 +1685,7 @@
                         ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`
                         : ''}
                     <span class="it-open">看內容/編輯 ▸</span>
+                    ${cost ? `<div class="it-cost">💰 ${cost}</div>` : ''}
                     <div class="it-meta">${esc(meta.join(' · '))}</div>
                     <div class="it-meta-short">${esc(short)}</div>
                 </div>
@@ -1669,6 +1722,8 @@
                 it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片',
                 it.byNames.length ? it.byNames.join('、') : '',
             ].filter(Boolean).join(' · ');
+            const last = it.logs && it.logs[it.logs.length - 1];
+            const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid) : '';
             return `
                 <div class="sheet-head">
                     <span class="sheet-title">${esc(it.title)}</span>
@@ -1679,6 +1734,9 @@
                     <button type="button" class="sheet-close" title="關閉">&times;</button>
                 </div>
                 <div class="sheet-meta">${esc(meta)}</div>
+                ${(cost || it.status !== '_loose') ? `<div class="it-cost sheet-cost">${cost || '💰 尚未填費用'}
+                    <button type="button" class="ghost small" data-cost-edit="${esc(it.itemId)}">${cost ? '改費用' : '填費用'}</button></div>` : ''}
+                ${costEditHtml(it)}
                 ${todoBlock(it)}
                 ${it.logs.map(boardRecord).join('')}`;
         }
@@ -1692,6 +1750,56 @@
             const sheet = $('sheet');
             if (sheet) sheet.classList.add('open');
             bindEntryActions(box);
+        }
+
+        // ---------- 費用編輯（在工項浮層裡就地改，不跳去後台）----------
+        // 展開編輯表單的 HTML；平常是空的（按「改費用／填費用」才顯示）
+        function costEditHtml(it) {
+            if (it.status === '_loose') return '';
+            const last = it.logs && it.logs[it.logs.length - 1];
+            const item = (last && last.src && last.src.items) || {};
+            return `<div class="cost-edit hidden" data-cost-edit-box="${esc(it.itemId)}">
+                <div class="cost-edit-grid">
+                    <label>預估款<input type="number" data-cost-field="estimated_cost" value="${esc(item.estimated_cost ?? '')}" min="0" step="1" placeholder="0"></label>
+                    <label>工程款<input type="number" data-cost-field="final_cost" value="${esc(item.final_cost ?? '')}" min="0" step="1" placeholder="0"></label>
+                    <label>已付<input type="number" data-cost-field="paid_amount" value="${esc(item.paid_amount ?? '')}" min="0" step="1" placeholder="0"></label>
+                </div>
+                <div class="cost-edit-actions">
+                    <button type="button" class="primary small" data-cost-save="${esc(it.itemId)}">儲存費用</button>
+                    <button type="button" class="ghost small" data-cost-cancel="${esc(it.itemId)}">取消</button>
+                </div>
+            </div>`;
+        }
+
+        // 點「改費用／填費用」→ 展開編輯表單（切換）
+        function toggleCostEdit(itemId) {
+            const box = document.querySelector(`[data-cost-edit-box="${itemId}"]`);
+            if (box) box.classList.toggle('hidden');
+        }
+
+        // 儲存費用 → 更新 items 表 → 重繪看板與浮層
+        async function saveCost(itemId) {
+            const box = document.querySelector(`[data-cost-edit-box="${itemId}"]`);
+            if (!box) return;
+            const num = sel => {
+                const inp = box.querySelector(`[data-cost-field="${sel}"]`);
+                const v = inp ? inp.value.trim() : '';
+                return (v === '') ? null : Number(v);
+            };
+            const est = num('estimated_cost'), fin = num('final_cost'), paid = num('paid_amount');
+            for (const [v, label] of [[est, '預估款'], [fin, '工程款'], [paid, '已付']]) {
+                if (v !== null && (!isFinite(v) || v < 0)) { say('listMsg', label + '必須是 0 以上的數字', 'error'); return; }
+            }
+            try {
+                const { error } = await supabase.from('items')
+                    .update({ estimated_cost: est, final_cost: fin, paid_amount: paid })
+                    .eq('id', itemId).select('id');
+                if (error) throw error;
+                say('listMsg', '費用已儲存', 'ok');
+                await loadEntries();   // 重撈 → 看板與浮層一起更新
+            } catch (err) {
+                say('listMsg', '費用儲存失敗：' + err.message, 'error');
+            }
         }
 
         function closeItemSheet() {
@@ -1758,6 +1866,16 @@
             });
             box.querySelectorAll('[data-edit]').forEach(btn => {
                 btn.onclick = () => startEditEntry(btn.getAttribute('data-edit'));
+            });
+            // 費用：改費用／儲存／取消
+            box.querySelectorAll('[data-cost-edit]').forEach(btn => {
+                btn.onclick = () => toggleCostEdit(btn.getAttribute('data-cost-edit'));
+            });
+            box.querySelectorAll('[data-cost-save]').forEach(btn => {
+                btn.onclick = () => saveCost(btn.getAttribute('data-cost-save'));
+            });
+            box.querySelectorAll('[data-cost-cancel]').forEach(btn => {
+                btn.onclick = () => toggleCostEdit(btn.getAttribute('data-cost-cancel'));
             });
             const cancel = box.querySelector('[data-cancel-edit]');
             if (cancel) cancel.onclick = () => {

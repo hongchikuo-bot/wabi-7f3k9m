@@ -285,7 +285,6 @@ export async function loadStructure() {
   renderProjectItems();
   fillStructureSelects();
   renderCostSummary();
-  loadBudget();
   bindStructureActions();
   renderMembers();
 }
@@ -430,62 +429,6 @@ function renderCostSummary() {
       <span class="cost-cell">未結 <strong class="${unpaid > 0 ? 'over' : ''}">${fin ? money(unpaid) : '—'}</strong></span>
     </div>`;
 }
-
-// ===== 預算與付款（每個專案一筆）=====
-let currentBudget = null;
-
-// 讀取目前專案的預算並填進表單
-async function loadBudget() {
-  if (!currentProject) return;
-  const summary = $('budgetSummary');
-  try {
-    currentBudget = await project.getBudget(currentProject.id);
-  } catch (err) {
-    console.warn('預算載入失敗', err);
-    currentBudget = null;
-  }
-  if ($('budgetEstimate')) $('budgetEstimate').value = currentBudget ? (Number(currentBudget.estimate) || '') : '';
-  if ($('budgetBilled')) $('budgetBilled').value = currentBudget ? (Number(currentBudget.billed) || '') : '';
-  if ($('budgetPaid')) $('budgetPaid').value = currentBudget ? (Number(currentBudget.paid) || '') : '';
-  if ($('budgetNotes')) $('budgetNotes').value = currentBudget ? (currentBudget.notes || '') : '';
-  renderBudgetSummary();
-}
-
-function renderBudgetSummary() {
-  const box = $('budgetSummary');
-  if (!box) return;
-  if (!currentBudget) { box.innerHTML = ''; return; }
-  const billed = Number(currentBudget.billed) || 0;
-  const paid = Number(currentBudget.paid) || 0;
-  const unpaid = billed - paid;
-  box.innerHTML = `
-    <div class="cost-summary">
-      <span class="cost-head">未付（工程款 − 已付）</span>
-      <span class="cost-cell">工程款 <strong>${money(billed)}</strong></span>
-      <span class="cost-cell">已付 <strong>${money(paid)}</strong></span>
-      <span class="cost-cell">未付 <strong class="${unpaid > 0 ? 'over' : (unpaid < 0 ? 'under' : '')}">${money(unpaid)}</strong></span>
-      ${currentBudget.notes ? `<span class="cost-cell">備註：${esc(currentBudget.notes)}</span>` : ''}
-    </div>`;
-}
-
-// 儲存預算（inline onclick 呼叫，要掛到 window）
-async function saveBudget() {
-  if (!currentProject) { showToast('請先進入專案', 'error'); return; }
-  const values = {
-    estimate: $('budgetEstimate').value,
-    billed: $('budgetBilled').value,
-    paid: $('budgetPaid').value,
-    notes: $('budgetNotes').value
-  };
-  try {
-    currentBudget = await project.saveBudget(currentProject.id, values);
-    renderBudgetSummary();
-    showToast('預算已儲存', 'success');
-  } catch (err) {
-    showToast('儲存失敗：' + err.message, 'error');
-  }
-}
-window.saveBudget = saveBudget;
 
 // ===== 進度歷程（單一項目的時間軸）=====
 // 「以項目為中心」的視角：把散落在不同日期的紀錄，依時間串成一條線，
