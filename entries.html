@@ -221,6 +221,21 @@
         }
         .it-maint.soon { background: #fff3cd; color: #7a5c1e; font-weight: 500; }
         .it-maint.overdue { background: #f8d7da; color: #8b2e2e; font-weight: 600; }
+        /* 維修待辦卡（開案欄裡獨立一筆） */
+        .maint-card {
+            border-left: 3px solid #bf8b2e; background: #fffdf7;
+            border-radius: 6px; padding: 0.5rem 0.6rem; margin: 0.35rem 0;
+            font-size: 0.82rem; color: var(--color-accent);
+        }
+        .maint-card.soon { background: #fff3cd; border-left-color: #d9a520; }
+        .maint-card.overdue { background: #f8d7da; border-left-color: #8b2e2e; }
+        .maint-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.5rem; cursor: pointer; }
+        .maint-card-head input[type=checkbox] { width: auto; flex: 0 0 auto; margin: 0; }
+        .maint-card-name { font-weight: 500; cursor: pointer; }
+        .maint-card-next { font-weight: 600; }
+        .maint-card.overdue .maint-card-next { color: #8b2e2e; }
+        .maint-card .maint-next { width: auto; font-size: 0.72rem; padding: 0.05rem 0.2rem; border: 1px solid var(--color-line); border-radius: 4px; }
+        .maint-card-owner { font-size: 0.7rem; color: var(--color-muted); }
 
         .it-caret { font-size: 0.75rem; color: var(--color-muted); }
         .item-row.open .it-caret { transform: rotate(90deg); }
@@ -1796,6 +1811,48 @@
             refreshFormTodos();
         }
 
+        // 改維修待辦名稱（名稱維持原工項名，但可變）
+        async function renameMaint(id) {
+            const before = TODOS.find(x => x.id === id);
+            if (!before) return;
+            const name = String(prompt('維修名稱', before.text || '') || '').trim();
+            if (!name || name === before.text) return;
+            const { error } = await supabase.from('item_todos')
+                .update({ text: name }).eq('id', id).select('id');
+            if (error) {
+                say('listMsg', '維修名稱更新失敗：' + error.message, 'error');
+                return renderEntries();
+            }
+            before.text = name;
+            renderEntries();
+            refreshFormTodos();
+        }
+
+        // 維修待辦在看板「開案（待辦）」欄獨立成一筆（一張小卡）
+        function maintCardHtml(t) {
+            const u = maintUrgency(t);
+            const nextStr = t.next_maint_at ? fmtMonthDay(t.next_maint_at) : '待填';
+            const itemName = itemNameOf(t.item_id);
+            return `<div class="maint-card${u ? ' ' + u : ''}" data-item="${esc(t.item_id)}">
+                <div class="maint-card-head" data-item-head>
+                    <input type="checkbox" data-todo="${esc(t.id)}" title="勾掉＝這次維修做完了（會自動生成下一個）">
+                    <span class="maint-card-name" data-maint-name="${esc(t.id)}" title="點一下改名">🔧 ${esc(t.text)}</span>
+                    <span class="maint-card-next">下次 ${esc(nextStr)}</span>
+                    <input type="date" class="maint-next" data-maint-next="${esc(t.id)}" value="${esc(t.next_maint_at || '')}" title="下次維修時間">
+                    ${itemName ? `<span class="maint-card-owner">${esc(itemName)}</span>` : ''}
+                </div>
+            </div>`;
+        }
+
+        // 維修待辦屬於哪個工項（顯示「防水工程」當參考；名稱本身是維修待辦自己的 text）
+        function itemNameOf(itemId) {
+            for (const g of LAST_BOARD) {
+                const it = g.items.find(x => x.itemId === itemId);
+                if (it) return it.title;
+            }
+            return '';
+        }
+
         function boardItem(it) {
             const meta = [];
             if (it.opening) meta.push(fmtMonthDay(it.opening) + ' 開案');
@@ -1806,13 +1863,6 @@
             // 費用（掛在工項上；同一工項每筆 log 的費用一樣，取最後一筆）
             const last = it.logs && it.logs[it.logs.length - 1];
             const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid) : '';
-            // 維修待辦（掛在 item_todos，未完成的）：看板卡上直接看到，快到黃、逾期紅
-            const maintTodos = TODOS.filter(t => t.item_id === it.itemId && t.maint && !t.done);
-            const maintHtml = maintTodos.map(t => {
-                const u = maintUrgency(t);
-                const nextStr = t.next_maint_at ? fmtMonthDay(t.next_maint_at) : '待填';
-                return `<div class="it-maint${u ? ' ' + u : ''}">🔧 ${esc(t.text)}：下次 ${esc(nextStr)}</div>`;
-            }).join('');
             return `<div class="item-row" data-item="${esc(it.itemId)}">
                 <div class="item-head" data-item-head>
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
@@ -1822,7 +1872,6 @@
                         : ''}
                     <span class="it-open">看內容/編輯 ▸</span>
                     ${cost ? `<div class="it-cost">💰 ${cost}</div>` : ''}
-                    ${maintHtml}
                     <div class="it-meta">${esc(meta.join(' · '))}</div>
                     <div class="it-meta-short">${esc(short)}</div>
                 </div>
@@ -1963,23 +2012,38 @@
             }
             const groups = buildTree(entryList.map(entryToLog));
             LAST_BOARD = groups;
+            // 維修待辦（未完成）在看板「開案（待辦）」欄獨立成一筆
+            const maintOpen = TODOS.filter(t => t.maint && !t.done);
             box.innerHTML = `<div class="tree">${groups.map(g => `
                 <div class="grp${COLLAPSED_BY_DEFAULT[g.status] ? ' collapsed' : ''}">
                     <div class="grp-head" data-grp-head>
                         <span class="grp-title">${esc(g.title)}</span>
-                        <span class="grp-count">${g.items.length}</span>
+                        <span class="grp-count">${g.status === '' ? g.items.length + maintOpen.length : g.items.length}</span>
                         <span class="grp-caret">▾</span>
                     </div>
-                    <div class="grp-body">${g.items.length
+                    <div class="grp-body">${(g.status === '' && maintOpen.length ? maintOpen.map(maintCardHtml).join('') : '')
+                        }${g.items.length
                         ? g.items.map(boardItem).join('')
-                        : '<div class="grp-empty">—</div>'}</div>
+                        : ((g.status === '' && maintOpen.length) ? '' : '<div class="grp-empty">—</div>')}</div>
                 </div>`).join('')}</div>`;
 
             box.querySelectorAll('[data-grp-head]').forEach(h =>
                 h.onclick = () => h.closest('.grp').classList.toggle('collapsed'));
-            // 點工項 → 開全寬浮層（不再就地展開：欄位太窄）
-            box.querySelectorAll('[data-item-head]').forEach(h =>
-                h.onclick = () => openItemSheet(h.closest('.item-row').getAttribute('data-item')));
+            // 點工項／維修卡 → 開全寬浮層；但點到 checkbox、日期、改名等控制項不要觸發
+            box.querySelectorAll('[data-item-head]').forEach(h => {
+                h.onclick = ev => {
+                    if (ev.target.closest('input, button, [data-maint-name]')) return;
+                    const card = h.closest('.item-row, .maint-card');
+                    if (card) openItemSheet(card.getAttribute('data-item'));
+                };
+            });
+            // 維修卡改名（點名稱）
+            box.querySelectorAll('[data-maint-name]').forEach(n => {
+                n.onclick = ev => {
+                    ev.stopPropagation();
+                    renameMaint(n.getAttribute('data-maint-name'));
+                };
+            });
 
             // 正在編輯的那一筆 → 自動把它所屬工項的浮層打開（不然找不到表單）
             if (editingEntryId) {
