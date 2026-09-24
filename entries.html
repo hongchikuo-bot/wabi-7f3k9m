@@ -2093,6 +2093,20 @@
                     <option value="paused"${curStatus === 'paused' ? ' selected' : ''}>暫停</option>
                 </select>
 
+                <!-- 長期維修：勾「已完成」後才出現；勾了再出現名稱＋下次維修時間 -->
+                <div id="ee-maint-wrap" style="display:none; margin-top:10px; padding:10px; border:1px dashed var(--color-line); border-radius:6px;">
+                    <label class="check-line" style="font-size:13px">
+                        <input type="checkbox" id="ee-maintenance">
+                        <span>完工後有<strong>長期維修</strong>需求</span>
+                    </label>
+                    <div id="ee-maint-date-wrap" style="display:none; margin-top:8px;">
+                        <label>維修名稱</label>
+                        <input type="text" id="ee-maint-name" placeholder="例：空調保養（留空＝用這個工項名）">
+                        <label style="margin-top:8px;">下次維修時間</label>
+                        <input type="date" id="ee-next-maint">
+                    </div>
+                </div>
+
                 <div class="hint">${curWT
                     ? '「開案 / 進行中 / 暫停」都是未完成；勾了上面的「已完成」就不用選。'
                     : '要能設定狀態，請先在上面填「工項」——狀態是記在進度卡上。'}</div>
@@ -2219,9 +2233,21 @@
             const cmp = box.querySelector('#ee-complete');
             const sel = box.querySelector('#ee-status');
             const wtInp = box.querySelector('#ee-worktype');
+            const eeMaintWrap = box.querySelector('#ee-maint-wrap');
+            const eeMaintDate = box.querySelector('#ee-maint-date-wrap');
+            const eeMaintChk = box.querySelector('#ee-maintenance');
             if (cmp && sel) {
-                const sync = () => { sel.disabled = cmp.checked || !(wtInp && wtInp.value.trim()); };
+                const syncStatus = () => { sel.disabled = cmp.checked || !(wtInp && wtInp.value.trim()); };
+                const syncMaint = () => {
+                    if (!eeMaintWrap || !eeMaintDate || !eeMaintChk) return;
+                    const show = cmp.checked;
+                    eeMaintWrap.style.display = show ? 'block' : 'none';
+                    if (!show) eeMaintChk.checked = false;
+                    eeMaintDate.style.display = (show && eeMaintChk.checked) ? 'block' : 'none';
+                };
+                const sync = () => { syncStatus(); syncMaint(); };
                 cmp.onchange = sync;
+                if (eeMaintChk) eeMaintChk.onchange = sync;
                 if (wtInp) wtInp.oninput = sync;
                 sync();
             }
@@ -2377,6 +2403,23 @@
                     .update({ status: complete ? 'completed' : (statusChoice || null) }).eq('id', itemId);
                 if (uErr) statusNote = `（但進度卡狀態更新失敗：${uErr.message}）`;
                 else statusNote = `，這個工項標記為「${statusText(statusChoice)}」`;
+            }
+
+            // 長期維修：勾「已完成」＋「長期維修」→ 生成維修待辦（若這個工項還沒有未完成的維修待辦）
+            if (itemId && complete && $('ee-maintenance') && $('ee-maintenance').checked) {
+                const already = TODOS.some(t => t.item_id === itemId && t.maint && !t.done);
+                if (!already) {
+                    const name = ($('ee-maint-name') && $('ee-maint-name').value.trim()) || curWT || '長期維修';
+                    const nextMaint = $('ee-next-maint') ? ($('ee-next-maint').value || null) : null;
+                    const { error: mErr } = await supabase.from('item_todos')
+                        .insert([{ item_id: itemId, project_id: e.project_id, text: name, done: false,
+                                   maint: true, next_maint_at: nextMaint, recorder_name: MY_NAME || null }])
+                        .select().single();
+                    if (mErr) statusNote += `\n⚠️ 維修待辦生成失敗：${mErr.message}`;
+                    else statusNote += nextMaint
+                        ? `，並生成維修待辦「${name}」（下次 ${nextMaint}）`
+                        : `，並生成維修待辦「${name}」（下次維修時間待填）`;
+                }
             }
 
             unlock();
