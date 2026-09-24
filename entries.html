@@ -210,6 +210,9 @@
         }
         .maint-row.soon { background: #fff3cd; color: #7a5c1e; font-weight: 500; }
         .maint-row.overdue { background: #f8d7da; color: #8b2e2e; font-weight: 600; }
+        /* 看板卡上的維修行：佔滿整行 */
+        .it-maint { flex-basis: 100%; }
+        .it-maint .maint-row { font-size: 0.75rem; padding: 0.25rem 0.5rem; }
 
         .it-caret { font-size: 0.75rem; color: var(--color-muted); }
         .item-row.open .it-caret { transform: rotate(90deg); }
@@ -1757,6 +1760,8 @@
             // 費用（掛在工項上；同一工項每筆 log 的費用一樣，取最後一筆）
             const last = it.logs && it.logs[it.logs.length - 1];
             const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid) : '';
+            // 維修（看板卡上直接看到：快到黃、逾期紅）
+            const maint = (last && last.src) ? maintenanceOf(last) : null;
             return `<div class="item-row" data-item="${esc(it.itemId)}">
                 <div class="item-head" data-item-head>
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
@@ -1766,6 +1771,7 @@
                         : ''}
                     <span class="it-open">看內容/編輯 ▸</span>
                     ${cost ? `<div class="it-cost">💰 ${cost}</div>` : ''}
+                    ${maint ? `<div class="it-maint">${maint.html}</div>` : ''}
                     <div class="it-meta">${esc(meta.join(' · '))}</div>
                     <div class="it-meta-short">${esc(short)}</div>
                 </div>
