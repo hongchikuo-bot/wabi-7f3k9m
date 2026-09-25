@@ -1365,28 +1365,34 @@
             }
 
             // 長期維修：勾「已完成」＋「長期維修」→ 生成一個「獨立維修工項」（能上傳照片/紀錄/編輯）
+            // 若結案的是「維修工項」本身，這日期直接作為「下一個維修」的時間，不再多生成一筆
             let maintNote = '';
+            let nextMaintForCycle = null;
             if (itemId && markComplete && $('mark_maintenance') && $('mark_maintenance').checked) {
                 const name = ($('maint_name') && $('maint_name').value.trim()) || workType || '長期維修';
                 const nextMaint = $('next_maintenance_at') ? ($('next_maintenance_at').value || null) : null;
-                const dbgNext = $('next_maintenance_at') ? JSON.stringify($('next_maintenance_at').value) : '欄位不存在';
-                const dbgName = $('maint_name') ? JSON.stringify($('maint_name').value) : '名稱欄位不存在';
-                try {
-                    const m = await spawnMaintenanceItem(projectId, nodeId, name, nextMaint);
-                    maintNote = nextMaint
-                        ? `，並生成維修工項「${m.title}」（下次 ${nextMaint}）`
-                        : `，並生成維修工項「${m.title}」（下次維修時間待填；診斷:日期=${dbgNext},名稱=${dbgName}）`;
-                } catch (mErr) {
-                    maintNote = `\n⚠️ 維修工項生成失敗：${mErr.message}`; hadErr = true;
+                if (spawnNextFor) {
+                    nextMaintForCycle = nextMaint;
+                } else {
+                    try {
+                        const m = await spawnMaintenanceItem(projectId, nodeId, name, nextMaint);
+                        maintNote = nextMaint
+                            ? `，並生成維修工項「${m.title}」（下次 ${nextMaint}）`
+                            : `，並生成維修工項「${m.title}」（下次維修時間待填）`;
+                    } catch (mErr) {
+                        maintNote = `\n⚠️ 維修工項生成失敗：${mErr.message}`; hadErr = true;
+                    }
                 }
             }
 
-            // 維修工項完成 → 自動生成下一個（名稱沿用、下次時間待填；照片不帶，維修照片在新紀錄裡）
+            // 維修工項完成 → 自動生成下一個（名稱沿用；下次時間＝上面填的日期，或待填；照片不帶）
             if (spawnNextFor) {
                 try {
                     const nxt = await spawnMaintenanceItem(projectId, spawnNextFor.node_id,
-                        workTypeOf(spawnNextFor), null);
-                    extra += `，並排下一個維修「${nxt.title}」`;
+                        workTypeOf(spawnNextFor), nextMaintForCycle);
+                    extra += nextMaintForCycle
+                        ? `，並排下一個維修「${nxt.title}」（下次 ${nextMaintForCycle}）`
+                        : `，並排下一個維修「${nxt.title}」（下次維修時間待填）`;
                 } catch (mErr) {
                     extra += `\n⚠️ 下一個維修工項生成失敗：${mErr.message}`; hadErr = true;
                 }
@@ -2462,28 +2468,34 @@
             }
 
             // 長期維修：勾「已完成」＋「長期維修」→ 生成一個「獨立維修工項」
+            // 若結案的是「維修工項」本身，這日期直接作為「下一個維修」的時間，不再多生成一筆
+            let nextMaintForCycle = null;
             if (itemId && complete && $('ee-maintenance') && $('ee-maintenance').checked) {
                 const name = ($('ee-maint-name') && $('ee-maint-name').value.trim()) || wt || '長期維修';
                 const nextEl = $('ee-next-maint');
                 const nextMaint = nextEl ? (nextEl.value || null) : null;
-                const dbg = nextEl ? JSON.stringify(nextEl.value) : '欄位不存在';
-                const dbgName = $('ee-maint-name') ? JSON.stringify($('ee-maint-name').value) : '名稱欄位不存在';
-                try {
-                    const m = await spawnMaintenanceItem(e.project_id, nodeId, name, nextMaint);
-                    statusNote += nextMaint
-                        ? `，並生成維修工項「${m.title}」（下次 ${nextMaint}）`
-                        : `，並生成維修工項「${m.title}」（下次維修時間待填；診斷:日期=${dbg},名稱=${dbgName}）`;
-                } catch (mErr) {
-                    statusNote += `\n⚠️ 維修工項生成失敗：${mErr.message}`;
+                if (spawnNextFor) {
+                    nextMaintForCycle = nextMaint;
+                } else {
+                    try {
+                        const m = await spawnMaintenanceItem(e.project_id, nodeId, name, nextMaint);
+                        statusNote += nextMaint
+                            ? `，並生成維修工項「${m.title}」（下次 ${nextMaint}）`
+                            : `，並生成維修工項「${m.title}」（下次維修時間待填）`;
+                    } catch (mErr) {
+                        statusNote += `\n⚠️ 維修工項生成失敗：${mErr.message}`;
+                    }
                 }
             }
 
-            // 維修工項完成 → 自動生成下一個（名稱沿用、下次時間待填）
+            // 維修工項完成 → 自動生成下一個（名稱沿用；下次時間＝上面填的日期，或待填）
             if (spawnNextFor) {
                 try {
                     const nxt = await spawnMaintenanceItem(e.project_id, spawnNextFor.node_id,
-                        workTypeOf(spawnNextFor), null);
-                    statusNote += `，並排下一個維修「${nxt.title}」`;
+                        workTypeOf(spawnNextFor), nextMaintForCycle);
+                    statusNote += nextMaintForCycle
+                        ? `，並排下一個維修「${nxt.title}」（下次 ${nextMaintForCycle}）`
+                        : `，並排下一個維修「${nxt.title}」（下次維修時間待填）`;
                 } catch (mErr) {
                     statusNote += `\n⚠️ 下一個維修工項生成失敗：${mErr.message}`;
                 }
