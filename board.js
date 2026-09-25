@@ -84,6 +84,8 @@ function buildTree(logs) {
             byNames: [...new Set(sorted.map(x => x.recorder_name).filter(Boolean))],
             opening: openingOf(sorted, last),
             days: daysSince(openingOf(sorted, last)),
+            maintenance: !!last.maintenance,
+            next_maintenance_at: last.next_maintenance_at || null,
         });
     }
     for (const g of groups) {

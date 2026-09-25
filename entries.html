@@ -203,46 +203,17 @@
         .cost-edit-grid label { font-size: 0.78rem; color: var(--color-accent); display: flex; flex-direction: column; gap: 0.25rem; }
         .cost-edit-actions { display: flex; gap: 0.5rem; }
         .cost-edit-actions button { width: auto; }
-        /* 長期維修待辦（待在待辦清單裡）：快到＝黃、逾期＝紅 */
-        .todo-row.maint { background: #f7f3ec; }
-        .todo-row.maint.soon { background: #fff3cd; }
-        .todo-row.maint.overdue { background: #f8d7da; }
-        .todo-row.maint .todo-text { color: var(--color-accent); }
-        .todo-row.maint.overdue .todo-text { color: #8b2e2e; font-weight: 600; }
-        .todo-row.maint .maint-next {
-            width: auto; font-size: 0.72rem; padding: 0.05rem 0.2rem;
-            border: 1px solid var(--color-line); border-radius: 4px; color: var(--color-accent);
-        }
-        .todo-row.maint .maint-prev { font-size: 0.72rem; color: var(--color-muted); margin-left: 0.4rem; }
-        /* 看板卡上的維修行 */
+        /* 看板卡上的維修行（維修工項） */
         .it-maint {
             flex-basis: 100%; font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 6px;
             background: #f7f3ec; color: var(--color-accent);
         }
         .it-maint.soon { background: #fff3cd; color: #7a5c1e; font-weight: 500; }
         .it-maint.overdue { background: #f8d7da; color: #8b2e2e; font-weight: 600; }
-        /* 維修待辦卡（開案欄裡獨立一筆） */
-        .maint-card {
-            border-left: 3px solid #bf8b2e; background: #fffdf7;
-            border-radius: 6px; padding: 0.5rem 0.6rem; margin: 0.35rem 0;
-            font-size: 0.82rem; color: var(--color-accent);
-        }
-        .maint-card.soon { background: #fff3cd; border-left-color: #d9a520; }
-        .maint-card.overdue { background: #f8d7da; border-left-color: #8b2e2e; }
-        .maint-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.5rem; cursor: pointer; }
-        .maint-card-head input[type=checkbox] { width: auto; flex: 0 0 auto; margin: 0; }
-        .maint-card-name { font-weight: 500; cursor: pointer; }
-        .maint-card-next { font-weight: 600; }
-        .maint-card.overdue .maint-card-next { color: #8b2e2e; }
-        .maint-card .maint-next { width: auto; font-size: 0.72rem; padding: 0.05rem 0.2rem; border: 1px solid var(--color-line); border-radius: 4px; }
-        .maint-card-owner { font-size: 0.7rem; color: var(--color-muted); }
-        /* 維修浮層 */
-        .maint-sheet-body { padding: 0.8rem 0; }
-        .maint-sheet-body input[type=text], .maint-sheet-body input[type=date] {
-            width: 100%; margin-top: 4px;
-        }
-        .maint-sheet-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 14px; }
-        .maint-sheet-actions button { width: auto; }
+        /* 維修工項浮層：下次維修時間 */
+        .maint-sheet-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0; font-size: 0.85rem; }
+        .maint-sheet-row label { white-space: nowrap; }
+        .maint-sheet-row input[type=date] { width: auto; }
 
         .it-caret { font-size: 0.75rem; color: var(--color-muted); }
         .item-row.open .it-caret { transform: rotate(90deg); }
@@ -738,7 +709,7 @@
             const [lv, nd, it] = await Promise.all([
                 supabase.from('hierarchy_levels').select('*').eq('project_id', projectId).order('level_index'),
                 supabase.from('hierarchy_nodes').select('*').eq('project_id', projectId).order('sort_order'),
-                supabase.from('items').select('id, title, status, node_id, work_type').eq('project_id', projectId).order('created_at')
+                supabase.from('items').select('id, title, status, node_id, work_type, maintenance, next_maintenance_at').eq('project_id', projectId).order('created_at')
             ]);
             const err = lv.error || nd.error || it.error;
             if (err) throw new Error(err.message);
@@ -845,7 +816,7 @@
             const fetchPairRows = async () => {
                 // 只查這個地點，數量小；本地清單可能是舊的（別人剛建過）
                 const { data, error } = await supabase.from('items')
-                    .select('id, title, status, node_id, work_type')
+                    .select('id, title, status, node_id, work_type, maintenance, next_maintenance_at')
                     .eq('project_id', projectId).eq('node_id', nodeId);
                 if (error) throw new Error('查詢工項失敗：' + error.message);
                 return data || [];
@@ -866,6 +837,49 @@
             }
             ITEMS_BY_ID.set(created.id, created);
             if (!WORK_TYPES.some(v => normWT(v) === key)) WORK_TYPES.push(wt);
+            return created;
+        }
+
+        // 長期維修：建立一個「獨立維修工項」（items 一列，maintenance=true）。
+        // 它跟一般工項一樣能上傳照片、寫紀錄、編輯；只是多「下次維修時間」＋完成後自動循環。
+        // 名稱沿用原工項名（可改）；node_id 沿用原工項地點。
+        async function spawnMaintenanceItem(projectId, nodeId, name, nextMaint) {
+            const nm = String(name || '').trim() || '長期維修';
+            const next = nextMaint || null;
+            let created = null;
+            try {
+                const { data, error } = await supabase.from('items')
+                    .insert([{ project_id: projectId, node_id: nodeId, title: nm, work_type: nm,
+                               status: '', maintenance: true, next_maintenance_at: next }])
+                    .select().single();
+                if (error) throw error;
+                created = data;
+            } catch (err) {
+                // 23505：同地點已有同名工項 → 名稱加「（維修）」區分
+                if (err.code === '23505') {
+                    const alt = nm + '（維修）';
+                    const { data, error } = await supabase.from('items')
+                        .insert([{ project_id: projectId, node_id: nodeId, title: alt, work_type: alt,
+                                   status: '', maintenance: true, next_maintenance_at: next }])
+                        .select().single();
+                    if (error) throw error;
+                    created = data;
+                } else {
+                    throw err;
+                }
+            }
+            ITEMS_BY_ID.set(created.id, created);
+            // 維修工項要出現在看板，必須有一筆 project_logs 指向它（buildTree 是從紀錄分組的）。
+            // 這筆當「開案起點」：內容寫「長期維修」，之後用戶點進去做維修、補照片就照常新增紀錄。
+            try {
+                await supabase.from('project_logs').insert([{
+                    project_id: projectId, node_id: nodeId, item_id: created.id,
+                    log_date: new Date().toISOString().slice(0, 10),
+                    main_description: '長期維修',
+                    resolution: next ? ('下次維修時間：' + next) : '下次維修時間待填',
+                    progress_status: null
+                }]);
+            } catch (e) { /* 開案紀錄失敗不擋維修工項本身；看板可能要重整理才看得到 */ }
             return created;
         }
 
@@ -1340,26 +1354,40 @@
 
             // 勾了「這次拍攝後已完成」→ 順手把進度卡結案
             let extra = '', hadErr = false;
+            let spawnNextFor = null;   // 若結案的是「維修工項」，完成後要自動生成下一個
             if (itemId && markComplete) {
                 const { error: ue } = await supabase.from('items')
                     .update({ status: 'completed' }).eq('id', itemId);
                 if (ue) { extra = `\n⚠️ 紀錄已存，但進度卡狀態更新失敗：${ue.message}`; hadErr = true; }
                 else extra = '，這個工項已標記為「已完成」';
+                // 維修工項完成 → 自動生成下一個維修工項（循環）
+                if (itemRow && itemRow.maintenance) spawnNextFor = itemRow;
             }
 
-            // 長期維修：勾「已完成」＋「長期維修」→ 生成一個維修待辦（留在待辦清單）
+            // 長期維修：勾「已完成」＋「長期維修」→ 生成一個「獨立維修工項」（能上傳照片/紀錄/編輯）
             let maintNote = '';
             if (itemId && markComplete && $('mark_maintenance') && $('mark_maintenance').checked) {
                 const name = ($('maint_name') && $('maint_name').value.trim()) || workType || '長期維修';
                 const nextMaint = $('next_maintenance_at') ? ($('next_maintenance_at').value || null) : null;
-                const { error: mErr } = await supabase.from('item_todos')
-                    .insert([{ item_id: itemId, project_id: projectId, text: name, done: false,
-                               maint: true, next_maint_at: nextMaint, recorder_name: MY_NAME || null }])
-                    .select().single();
-                if (mErr) { maintNote = `\n⚠️ 維修待辦生成失敗：${mErr.message}`; hadErr = true; }
-                else maintNote = nextMaint
-                    ? `，並生成維修待辦「${name}」（下次 ${nextMaint}）`
-                    : `，並生成維修待辦「${name}」（下次維修時間待填）`;
+                try {
+                    const m = await spawnMaintenanceItem(projectId, nodeId, name, nextMaint);
+                    maintNote = nextMaint
+                        ? `，並生成維修工項「${m.title}」（下次 ${nextMaint}）`
+                        : `，並生成維修工項「${m.title}」（下次維修時間待填）`;
+                } catch (mErr) {
+                    maintNote = `\n⚠️ 維修工項生成失敗：${mErr.message}`; hadErr = true;
+                }
+            }
+
+            // 維修工項完成 → 自動生成下一個（名稱沿用、下次時間待填；照片不帶，維修照片在新紀錄裡）
+            if (spawnNextFor) {
+                try {
+                    const nxt = await spawnMaintenanceItem(projectId, spawnNextFor.node_id,
+                        workTypeOf(spawnNextFor), null);
+                    extra += `，並排下一個維修「${nxt.title}」`;
+                } catch (mErr) {
+                    extra += `\n⚠️ 下一個維修工項生成失敗：${mErr.message}`; hadErr = true;
+                }
             }
 
             const where = NODE_PATHS.get(nodeId) || '';
@@ -1433,23 +1461,6 @@
                 return renderEntries();          // 重畫 → 勾選狀態回到資料庫的樣子
             }
             if (before) { before.done = !!done; before.done_at = doneAt; }
-            // 維修待辦被勾掉（這次維修做完了）→ 自動生成下一個維修待辦：
-            // 沿用名稱、帶上「上次完成日期」（＝這次完成日）、下次時間留空等填、照片不帶。
-            if (done && before && before.maint) {
-                const { data: next, error: nErr } = await supabase.from('item_todos')
-                    .insert([{
-                        item_id: before.item_id,
-                        project_id: before.project_id,
-                        text: before.text,
-                        done: false,
-                        maint: true,
-                        prev_done_at: new Date().toISOString().slice(0, 10),
-                        next_maint_at: null,
-                        recorder_name: MY_NAME || null
-                    }]).select().single();
-                if (nErr) say('listMsg', '維修待辦更新成功，但下一個維修待辦生成失敗：' + nErr.message, 'error');
-                else if (next) TODOS.push(next);
-            }
             renderEntries();
             refreshFormTodos();
         }
@@ -1484,7 +1495,7 @@
                 .select('id, log_date, log_time, location, main_description, progress_status, '
                        + 'issues_found, resolution, notes, project_id, item_id, node_id, created_at'
                        + recCol + ', log_photos(' + photoCols + '), '
-                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status)')
+                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at)')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
@@ -1595,6 +1606,9 @@
                 fin: e.items ? e.items.final_cost : null,
                 paid: e.items ? e.items.paid_amount : null,
                 pay_status: e.items ? e.items.payment_status : null,
+                // 長期維修：這是「維修工項」（獨立工項）還是普通工項；下次維修時間
+                maintenance: e.items ? e.items.maintenance : null,
+                next_maintenance_at: e.items ? e.items.next_maintenance_at : null,
             };
         }
 
@@ -1652,33 +1666,12 @@
         }
 
         // 待辦清單（工項層級）：未完成的在上面；勾掉可改完成日期；已完成的留著但淡化。
-        // 維修待辦（maint=true）有「下次維修時間」：快到(30天內)置頂黃、逾期置頂紅。
-        function maintUrgency(t) {
-            if (!t || !t.maint || !t.next_maint_at) return '';
-            const today = new Date(); today.setHours(0, 0, 0, 0);
-            const d = new Date(String(t.next_maint_at).slice(0, 10) + 'T00:00:00');
-            const diff = Math.round((d - today) / 86400000);
-            if (diff < 0) return 'overdue';
-            if (diff <= 30) return 'soon';
-            return '';
-        }
-
         function todoRowHtml(t) {
             const dateVal = t.done_at ? String(t.done_at).slice(0, 10) : '';
-            const isMaint = !!t.maint;
-            const urgency = isMaint && !t.done ? maintUrgency(t) : '';
-            const cls = [t.done ? 'done' : '', isMaint ? 'maint' : '', urgency]
-                .filter(Boolean).join(' ');
-            const maintNext = isMaint
-                ? `<input type="date" class="maint-next" data-maint-next="${esc(t.id)}" value="${esc(t.next_maint_at || '')}"
-                        title="下次維修時間（可改）">`
-                : '';
-            const maintPrev = (isMaint && t.prev_done_at)
-                ? `<span class="maint-prev">上次完成 ${fmtMonthDay(t.prev_done_at)}</span>` : '';
+            const cls = t.done ? 'done' : '';
             return `<div class="todo-row ${cls}">
                 <input type="checkbox" data-todo="${esc(t.id)}"${t.done ? ' checked' : ''}>
-                <span class="todo-text">${isMaint ? '🔧 ' : ''}${esc(t.text)}</span>
-                ${maintNext}${maintPrev}
+                <span class="todo-text">${esc(t.text)}</span>
                 ${t.done
                     ? `<input type="date" class="todo-date" data-todo-date="${esc(t.id)}" value="${esc(dateVal)}"
                               title="完成日期（可以改）">`
@@ -1691,15 +1684,7 @@
             const list = todosOf(itemId);
             const open = list.filter(t => !t.done);
             const done = list.filter(t => t.done);
-            // 未完成再分：一般待辦 vs 維修待辦（維修待辦正常待最下面、快到/逾期置頂）
-            const openNormal = open.filter(t => !t.maint);
-            const maintOverdue = open.filter(t => t.maint && maintUrgency(t) === 'overdue');
-            const maintSoon = open.filter(t => t.maint && maintUrgency(t) === 'soon');
-            const maintNormal = open.filter(t => t.maint && !maintUrgency(t));
-            const body = maintOverdue.map(todoRowHtml).join('')
-                + maintSoon.map(todoRowHtml).join('')
-                + openNormal.map(todoRowHtml).join('')
-                + maintNormal.map(todoRowHtml).join('');
+            const body = open.map(todoRowHtml).join('');
             return (body || (done.length ? '' : '<div class="hint">目前沒有待辦。</div>'))
                 + (done.length
                     ? `<div class="todos-done-head">已完成 ${done.length} 項</div>` + done.map(todoRowHtml).join('')
@@ -1769,9 +1754,6 @@
             box.querySelectorAll('[data-todo-date]').forEach(d => {
                 d.onchange = () => setTodoDate(d.getAttribute('data-todo-date'), d.value);
             });
-            box.querySelectorAll('[data-maint-next]').forEach(d => {
-                d.onchange = () => setMaintNext(d.getAttribute('data-maint-next'), d.value);
-            });
             box.querySelectorAll('[data-del-todo]').forEach(b => {
                 b.onclick = ev => { ev.preventDefault(); ev.stopPropagation();
                                     deleteTodo(b.getAttribute('data-del-todo')); };
@@ -1803,64 +1785,6 @@
             refreshFormTodos();
         }
 
-        // 改維修待辦的「下次維修時間」（Q4：可改）
-        async function setMaintNext(id, dateStr) {
-            const val = dateStr ? String(dateStr) : null;
-            const { error } = await supabase.from('item_todos')
-                .update({ next_maint_at: val }).eq('id', id).select('id');
-            if (error) {
-                say('listMsg', '下次維修時間更新失敗：' + error.message, 'error');
-                return renderEntries();
-            }
-            const t = TODOS.find(x => x.id === id);
-            if (t) t.next_maint_at = val;
-            renderEntries();
-            refreshFormTodos();
-        }
-
-        // 改維修待辦名稱（名稱維持原工項名，但可變）
-        async function renameMaint(id) {
-            const before = TODOS.find(x => x.id === id);
-            if (!before) return;
-            const name = String(prompt('維修名稱', before.text || '') || '').trim();
-            if (!name || name === before.text) return;
-            const { error } = await supabase.from('item_todos')
-                .update({ text: name }).eq('id', id).select('id');
-            if (error) {
-                say('listMsg', '維修名稱更新失敗：' + error.message, 'error');
-                return renderEntries();
-            }
-            before.text = name;
-            renderEntries();
-            refreshFormTodos();
-        }
-
-        // 維修待辦在看板「開案（待辦）」欄獨立成一筆（一張小卡）
-        function maintCardHtml(t) {
-            const u = maintUrgency(t);
-            const nextStr = t.next_maint_at ? fmtMonthDay(t.next_maint_at) : '待填';
-            const itemName = itemNameOf(t.item_id);
-            return `<div class="maint-card${u ? ' ' + u : ''}" data-maint="${esc(t.id)}">
-                <div class="maint-card-head" data-item-head>
-                    <input type="checkbox" data-todo="${esc(t.id)}" title="勾掉＝這次維修做完了（會自動生成下一個）">
-                    <span class="maint-card-name" data-maint-name="${esc(t.id)}" title="點一下改名">🔧 ${esc(t.text)}</span>
-                    <span class="maint-card-next">下次 ${esc(nextStr)}</span>
-                    <input type="date" class="maint-next" data-maint-next="${esc(t.id)}" value="${esc(t.next_maint_at || '')}" title="下次維修時間">
-                    <span class="it-open">看內容/編輯 ▸</span>
-                    ${itemName ? `<span class="maint-card-owner">${esc(itemName)}</span>` : ''}
-                </div>
-            </div>`;
-        }
-
-        // 維修待辦屬於哪個工項（顯示「防水工程」當參考；名稱本身是維修待辦自己的 text）
-        function itemNameOf(itemId) {
-            for (const g of LAST_BOARD) {
-                const it = g.items.find(x => x.itemId === itemId);
-                if (it) return it.title;
-            }
-            return '';
-        }
-
         function boardItem(it) {
             const meta = [];
             if (it.opening) meta.push(fmtMonthDay(it.opening) + ' 開案');
@@ -1871,6 +1795,9 @@
             // 費用（掛在工項上；同一工項每筆 log 的費用一樣，取最後一筆）
             const last = it.logs && it.logs[it.logs.length - 1];
             const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid) : '';
+            // 維修工項（maintenance=true 且未完成）：顯示 🔧 + 下次時間；快到黃、逾期紅
+            const maint = (it.maintenance && it.status !== 'completed')
+                ? maintLine(it.next_maintenance_at) : '';
             return `<div class="item-row" data-item="${esc(it.itemId)}">
                 <div class="item-head" data-item-head>
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
@@ -1879,11 +1806,32 @@
                         ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`
                         : ''}
                     <span class="it-open">看內容/編輯 ▸</span>
+                    ${maint}
                     ${cost ? `<div class="it-cost">💰 ${cost}</div>` : ''}
                     <div class="it-meta">${esc(meta.join(' · '))}</div>
                     <div class="it-meta-short">${esc(short)}</div>
                 </div>
             </div>`;
+        }
+
+        // 維修工項的摘要行：🔧 下次 X月X日；快到（30 天內）黃、逾期紅
+        function maintLine(nextAt) {
+            if (!nextAt) return `<div class="it-maint">🔧 維修（下次待填）</div>`;
+            const u = dateUrgency(nextAt);
+            const cls = u === 'overdue' ? 'overdue' : (u === 'soon' ? 'soon' : '');
+            return `<div class="it-maint ${cls}">🔧 下次 ${fmtMonthDay(nextAt)}</div>`;
+        }
+
+        // 依日期算急迫度：逾期→overdue、30天內→soon、其餘→''
+        function dateUrgency(dateStr) {
+            if (!dateStr) return '';
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const d = new Date(String(dateStr).slice(0, 10) + 'T00:00:00');
+            if (isNaN(d)) return '';
+            const diff = Math.round((d - today) / 86400000);
+            if (diff < 0) return 'overdue';
+            if (diff <= 30) return 'soon';
+            return '';
         }
 
         // ---------- 點工項 → 全寬浮層（看板只當總覽；內容與編輯都在浮層裡）----------
@@ -1928,6 +1876,12 @@
                     <button type="button" class="sheet-close" title="關閉">&times;</button>
                 </div>
                 <div class="sheet-meta">${esc(meta)}</div>
+                ${it.maintenance ? `
+                <div class="maint-sheet-row">
+                    <label>🔧 下次維修時間</label>
+                    <input type="date" id="maint-next-input" value="${esc(it.next_maintenance_at || '')}">
+                    <button type="button" class="primary small" data-maint-save="${esc(it.itemId)}">儲存</button>
+                </div>` : ''}
                 ${(cost || it.status !== '_loose') ? `<div class="it-cost sheet-cost">${cost || '💰 尚未填費用'}
                     <button type="button" class="ghost small" data-cost-edit="${esc(it.itemId)}">${cost ? '改費用' : '填費用'}</button></div>` : ''}
                 ${costEditHtml(it)}
@@ -1944,57 +1898,6 @@
             const sheet = $('sheet');
             if (sheet) sheet.classList.add('open');
             bindEntryActions(box);
-        }
-
-        // ---------- 維修待辦自己的浮層（點維修卡 → 進來改名稱／時間／勾掉完成）----------
-        function maintSheetHtml(t) {
-            const itemName = itemNameOf(t.item_id);
-            const u = maintUrgency(t);
-            const uLabel = u === 'overdue' ? '（已逾期）' : (u === 'soon' ? '（快到期）' : '');
-            return `
-                <div class="sheet-head">
-                    <span class="sheet-title">🔧 ${esc(t.text)}</span>
-                    ${itemName ? `<span class="sheet-loc">${esc(itemName)}</span>` : ''}
-                    <span class="chip ${u === 'overdue' ? 'paused' : (u === 'soon' ? 'doing' : 'opened')}">維修${uLabel}</span>
-                    <button type="button" class="sheet-close" title="關閉">&times;</button>
-                </div>
-                <div class="maint-sheet-body">
-                    <label>維修名稱</label>
-                    <input type="text" id="maint-sheet-name" value="${esc(t.text)}">
-                    <label style="margin-top:10px;">下次維修時間</label>
-                    <input type="date" id="maint-sheet-next" value="${esc(t.next_maint_at || '')}">
-                    ${t.prev_done_at ? `<div class="hint">上次完成：${esc(fmtMonthDay(t.prev_done_at))}</div>` : ''}
-                    <div class="maint-sheet-actions">
-                        <button type="button" class="primary small" data-maint-save="${esc(t.id)}">儲存</button>
-                        <button type="button" class="ghost small" data-maint-done="${esc(t.id)}">✓ 這次維修完成（生成下一個）</button>
-                        <button type="button" class="danger small" data-maint-del="${esc(t.id)}">刪除</button>
-                    </div>
-                </div>`;
-        }
-
-        function openMaintSheet(todoId) {
-            const box = $('sheetBox');
-            const t = TODOS.find(x => x.id === todoId);
-            if (!box || !t) return;
-            OPEN_ITEM = null;   // 維修浮層不綁某個工項
-            box.innerHTML = maintSheetHtml(t);
-            const sheet = $('sheet');
-            if (sheet) sheet.classList.add('open');
-            bindEntryActions(box);
-        }
-
-        // 儲存維修名稱＋下次時間
-        async function saveMaintSheet(todoId) {
-            const name = ($('maint-sheet-name') ? $('maint-sheet-name').value.trim() : '') || '長期維修';
-            const next = $('maint-sheet-next') ? ($('maint-sheet-next').value || null) : null;
-            const { error } = await supabase.from('item_todos')
-                .update({ text: name, next_maint_at: next }).eq('id', todoId).select('id');
-            if (error) return say('listMsg', '維修待辦儲存失敗：' + error.message, 'error');
-            const t = TODOS.find(x => x.id === todoId);
-            if (t) { t.text = name; t.next_maint_at = next; }
-            say('listMsg', '維修待辦已儲存', 'ok');
-            closeItemSheet();
-            renderEntries();
         }
 
         // ---------- 費用編輯（在工項浮層裡就地改，不跳去後台）----------
@@ -2047,6 +1950,21 @@
             }
         }
 
+        // 儲存維修工項的「下次維修時間」→ 更新 items 表 → 重繪
+        async function saveMaintNext(itemId) {
+            const inp = $('maint-next-input');
+            const val = (inp && inp.value) ? inp.value : null;
+            try {
+                const { error } = await supabase.from('items')
+                    .update({ next_maintenance_at: val }).eq('id', itemId).select('id');
+                if (error) throw error;
+                say('listMsg', '下次維修時間已儲存', 'ok');
+                await loadEntries();
+            } catch (err) {
+                say('listMsg', '下次維修時間儲存失敗：' + err.message, 'error');
+            }
+        }
+
         function closeItemSheet() {
             OPEN_ITEM = null;
             const sheet = $('sheet');
@@ -2071,38 +1989,26 @@
             }
             const groups = buildTree(entryList.map(entryToLog));
             LAST_BOARD = groups;
-            // 維修待辦（未完成）在看板「開案（待辦）」欄獨立成一筆
-            const maintOpen = TODOS.filter(t => t.maint && !t.done);
             box.innerHTML = `<div class="tree">${groups.map(g => `
                 <div class="grp${COLLAPSED_BY_DEFAULT[g.status] ? ' collapsed' : ''}">
                     <div class="grp-head" data-grp-head>
                         <span class="grp-title">${esc(g.title)}</span>
-                        <span class="grp-count">${g.status === '' ? g.items.length + maintOpen.length : g.items.length}</span>
+                        <span class="grp-count">${g.items.length}</span>
                         <span class="grp-caret">▾</span>
                     </div>
-                    <div class="grp-body">${(g.status === '' && maintOpen.length ? maintOpen.map(maintCardHtml).join('') : '')
-                        }${g.items.length
+                    <div class="grp-body">${g.items.length
                         ? g.items.map(boardItem).join('')
-                        : ((g.status === '' && maintOpen.length) ? '' : '<div class="grp-empty">—</div>')}</div>
+                        : '<div class="grp-empty">—</div>'}</div>
                 </div>`).join('')}</div>`;
 
             box.querySelectorAll('[data-grp-head]').forEach(h =>
                 h.onclick = () => h.closest('.grp').classList.toggle('collapsed'));
-            // 點工項／維修卡 → 開全寬浮層；但點到 checkbox、日期、改名等控制項不要觸發
+            // 點工項 → 開全寬浮層；但點到 checkbox、日期等控制項不要觸發
             box.querySelectorAll('[data-item-head]').forEach(h => {
                 h.onclick = ev => {
-                    if (ev.target.closest('input, button, [data-maint-name]')) return;
-                    const maintCard = h.closest('.maint-card');
-                    if (maintCard) return openMaintSheet(maintCard.getAttribute('data-maint'));
+                    if (ev.target.closest('input, button')) return;
                     const itemCard = h.closest('.item-row');
                     if (itemCard) openItemSheet(itemCard.getAttribute('data-item'));
-                };
-            });
-            // 維修卡改名（點名稱）
-            box.querySelectorAll('[data-maint-name]').forEach(n => {
-                n.onclick = ev => {
-                    ev.stopPropagation();
-                    renameMaint(n.getAttribute('data-maint-name'));
                 };
             });
 
@@ -2139,21 +2045,9 @@
             box.querySelectorAll('[data-cost-cancel]').forEach(btn => {
                 btn.onclick = () => toggleCostEdit(btn.getAttribute('data-cost-cancel'));
             });
-            // 維修浮層：儲存／這次完成／刪除
+            // 維修工項浮層：儲存「下次維修時間」
             box.querySelectorAll('[data-maint-save]').forEach(btn => {
-                btn.onclick = () => saveMaintSheet(btn.getAttribute('data-maint-save'));
-            });
-            box.querySelectorAll('[data-maint-done]').forEach(btn => {
-                btn.onclick = async () => {
-                    await toggleTodo(btn.getAttribute('data-maint-done'), true);
-                    closeItemSheet();   // 完成後關閉浮層，回看板看生成的下一個
-                };
-            });
-            box.querySelectorAll('[data-maint-del]').forEach(btn => {
-                btn.onclick = async () => {
-                    await deleteTodo(btn.getAttribute('data-maint-del'));
-                    closeItemSheet();
-                };
+                btn.onclick = () => saveMaintNext(btn.getAttribute('data-maint-save'));
             });
             const cancel = box.querySelector('[data-cancel-edit]');
             if (cancel) cancel.onclick = () => {
@@ -2554,27 +2448,39 @@
 
             // ③ 進度卡的完成狀態（items.status 是唯一真相，公開頁面也讀這個）
             let statusNote = '';
+            let spawnNextFor = null;
             if (itemId) {
                 const { error: uErr } = await supabase.from('items')
                     .update({ status: complete ? 'completed' : (statusChoice || null) }).eq('id', itemId);
                 if (uErr) statusNote = `（但進度卡狀態更新失敗：${uErr.message}）`;
                 else statusNote = `，這個工項標記為「${statusText(statusChoice)}」`;
+                // 維修工項完成 → 自動生成下一個（循環）
+                const thisRow = ITEMS_BY_ID.get(itemId);
+                if (complete && thisRow && thisRow.maintenance) spawnNextFor = thisRow;
             }
 
-            // 長期維修：勾「已完成」＋「長期維修」→ 生成維修待辦（若這個工項還沒有未完成的維修待辦）
+            // 長期維修：勾「已完成」＋「長期維修」→ 生成一個「獨立維修工項」
             if (itemId && complete && $('ee-maintenance') && $('ee-maintenance').checked) {
-                const already = TODOS.some(t => t.item_id === itemId && t.maint && !t.done);
-                if (!already) {
-                    const name = ($('ee-maint-name') && $('ee-maint-name').value.trim()) || wt || '長期維修';
-                    const nextMaint = $('ee-next-maint') ? ($('ee-next-maint').value || null) : null;
-                    const { error: mErr } = await supabase.from('item_todos')
-                        .insert([{ item_id: itemId, project_id: e.project_id, text: name, done: false,
-                                   maint: true, next_maint_at: nextMaint, recorder_name: MY_NAME || null }])
-                        .select().single();
-                    if (mErr) statusNote += `\n⚠️ 維修待辦生成失敗：${mErr.message}`;
-                    else statusNote += nextMaint
-                        ? `，並生成維修待辦「${name}」（下次 ${nextMaint}）`
-                        : `，並生成維修待辦「${name}」（下次維修時間待填）`;
+                const name = ($('ee-maint-name') && $('ee-maint-name').value.trim()) || wt || '長期維修';
+                const nextMaint = $('ee-next-maint') ? ($('ee-next-maint').value || null) : null;
+                try {
+                    const m = await spawnMaintenanceItem(e.project_id, nodeId, name, nextMaint);
+                    statusNote += nextMaint
+                        ? `，並生成維修工項「${m.title}」（下次 ${nextMaint}）`
+                        : `，並生成維修工項「${m.title}」（下次維修時間待填）`;
+                } catch (mErr) {
+                    statusNote += `\n⚠️ 維修工項生成失敗：${mErr.message}`;
+                }
+            }
+
+            // 維修工項完成 → 自動生成下一個（名稱沿用、下次時間待填）
+            if (spawnNextFor) {
+                try {
+                    const nxt = await spawnMaintenanceItem(e.project_id, spawnNextFor.node_id,
+                        workTypeOf(spawnNextFor), null);
+                    statusNote += `，並排下一個維修「${nxt.title}」`;
+                } catch (mErr) {
+                    statusNote += `\n⚠️ 下一個維修工項生成失敗：${mErr.message}`;
                 }
             }
 
