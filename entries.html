@@ -850,7 +850,7 @@
             try {
                 const { data, error } = await supabase.from('items')
                     .insert([{ project_id: projectId, node_id: nodeId, title: nm, work_type: nm,
-                               status: '', maintenance: true, next_maintenance_at: next }])
+                               status: null, maintenance: true, next_maintenance_at: next }])
                     .select().single();
                 if (error) throw error;
                 created = data;
@@ -860,7 +860,7 @@
                     const alt = nm + '（維修）';
                     const { data, error } = await supabase.from('items')
                         .insert([{ project_id: projectId, node_id: nodeId, title: alt, work_type: alt,
-                                   status: '', maintenance: true, next_maintenance_at: next }])
+                                   status: null, maintenance: true, next_maintenance_at: next }])
                         .select().single();
                     if (error) throw error;
                     created = data;
