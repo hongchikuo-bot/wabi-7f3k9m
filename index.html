@@ -285,6 +285,15 @@
             padding: 0.15rem 0 0.15rem 0.6rem; margin-bottom: 0.7rem; white-space: pre-wrap;
         }
         @media (max-width: 700px) { .pub-todos { font-size: 0.72rem; } }
+        /* 公開頁的報價單（唯讀，可下載） */
+        .pub-quotes {
+            font-size: 0.82rem; color: var(--color-accent);
+            border-left: 2px solid rgba(191, 139, 46, 0.6);
+            padding: 0.15rem 0 0.15rem 0.6rem; margin-bottom: 0.7rem;
+            display: flex; flex-direction: column; gap: 0.25rem;
+        }
+        .pub-quotes a { color: var(--color-accent); text-decoration: underline; overflow-wrap: anywhere; }
+        @media (max-width: 700px) { .pub-quotes { font-size: 0.72rem; } }
         .chip.doing { background: rgba(191, 139, 46, 0.22); color: #8a6a1e; }
         .chip.paused { background: rgba(139, 46, 46, 0.15); color: #8b5454; }
 
@@ -569,6 +578,15 @@
             return `<div class="pub-todos">待辦：${open.map(t => esc(t.text)).join('、')}</div>`;
         }
 
+        // 報價單（公開頁唯讀）：費用佐證文件，可下載
+        function quoteLinks(it) {
+            const qs = it.quotes || [];
+            if (!qs.length) return '';
+            return `<div class="pub-quotes">${qs.map(q =>
+                `<a href="${esc(q.url || '')}" target="_blank" rel="noopener">📄 ${esc(q.name || '報價單')}</a>`
+            ).join('')}</div>`;
+        }
+
         function itemRow(it) {
             const meta = [];
             if (it.opening) meta.push(fmtMonthDay(it.opening) + ' 開案');
@@ -577,9 +595,11 @@
             if (openTodos.length) meta.push('待辦 ' + openTodos.length + ' 項');
             meta.push(it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片');
             if (it.byNames.length) meta.push(it.byNames.join('、'));
+            if ((it.quotes || []).length) meta.push('報價單 ' + it.quotes.length + ' 份');
             // 窄螢幕（欄位 ~90px）用短版摘要，不然整段文字會折成一團
             const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`
-                + (openTodos.length ? ` · 待辦${openTodos.length}` : '');
+                + (openTodos.length ? ` · 待辦${openTodos.length}` : '')
+                + ((it.quotes || []).length ? ` · 報價${it.quotes.length}` : '');
             return `<div class="item-row" data-item="${esc(it.itemId)}" onclick="toggleItem(this)">
                 <div class="item-head">
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
@@ -592,7 +612,7 @@
                     <div class="it-meta">${esc(meta.join(' · '))}</div>
                     <div class="it-meta-short">${esc(short)}</div>
                 </div>
-                <div class="item-body">${todoList(it)}${it.logs.map(recBlock).join('')}</div>
+                <div class="item-body">${todoList(it)}${quoteLinks(it)}${it.logs.map(recBlock).join('')}</div>
             </div>`;
         }
 

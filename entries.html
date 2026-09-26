@@ -203,6 +203,14 @@
         .cost-edit-grid label { font-size: 0.78rem; color: var(--color-accent); display: flex; flex-direction: column; gap: 0.25rem; }
         .cost-edit-actions { display: flex; gap: 0.5rem; }
         .cost-edit-actions button { width: auto; }
+        /* 報價單（工項浮層費用佐證） */
+        .quote-block { margin: 0.6rem 0; padding: 0.7rem; border: 1px dashed var(--color-line); border-radius: 6px; }
+        .quote-head { font-size: 0.82rem; color: var(--color-accent); margin-bottom: 0.5rem; font-weight: 600; }
+        .quote-list { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.5rem; }
+        .quote-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+        .quote-name { flex: 1; color: var(--color-accent); text-decoration: underline; overflow-wrap: anywhere; min-width: 0; }
+        .quote-add { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--color-accent); cursor: pointer; }
+        .quote-add:hover { opacity: 0.85; }
         /* 看板卡上的維修行（維修工項） */
         .it-maint {
             flex-basis: 100%; font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 6px;
@@ -592,6 +600,7 @@
             const { data: { user } } = await supabase.auth.getUser();
             await probeTakenAt();
             await probeRecorder();
+            await probeQuotes();
             if (!HAS_TODOS) await loadTodos();   // 先探一次（失敗也無所謂，畫面照常）
             await fetchMyName();
             $('whoami').textContent = MY_NAME
@@ -602,6 +611,7 @@
             if (!HAS_TAKEN_AT) missing.push('照片的「拍攝日期」（缺 log_photos.taken_at）');
             if (!HAS_RECORDER) missing.push('「紀錄人」（缺 project_logs.recorder_name 與公開頁的外掛視圖）');
             if (!HAS_TODOS) missing.push('「待辦清單」（缺 item_todos 表，要跑 sql/add-item-todos.sql）');
+            if (!HAS_QUOTES) missing.push('「報價單」（缺 items.quotes 與公開頁視圖，要跑 sql/add-item-quotes.sql）');
             if (missing.length) {
                 say('formMsg', 'ℹ️ 還沒啟用的功能：' + missing.join('、')
                     + '。\n其他功能都正常；跑一次 private-docs/sql 裡的 SQL，重新整理後就會自動啟用。', 'info');
@@ -1099,6 +1109,17 @@
             return HAS_RECORDER;
         }
 
+        // ---------- 報價單（工項的費用佐證文件，任何格式）----------
+        // 需要先在資料庫加欄位（見 private-docs/sql/add-item-quotes.sql）。
+        let HAS_QUOTES = false;
+
+        async function probeQuotes() {
+            // 有任何錯誤都當成「還沒有這個欄位」
+            const { error } = await supabase.from('items').select('quotes').limit(0);
+            HAS_QUOTES = !error;
+            return HAS_QUOTES;
+        }
+
         // 自己的顯示名稱（profiles 的 SELECT 政策允許讀「本人」）
         async function fetchMyName() {
             try {
@@ -1503,7 +1524,8 @@
                 .select('id, log_date, log_time, location, main_description, progress_status, '
                        + 'issues_found, resolution, notes, project_id, item_id, node_id, created_at'
                        + recCol + ', log_photos(' + photoCols + '), '
-                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at)')
+                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at'
+                       + (HAS_QUOTES ? ', quotes' : '') + ')')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
@@ -1617,6 +1639,8 @@
                 // 長期維修：這是「維修工項」（獨立工項）還是普通工項；下次維修時間
                 maintenance: e.items ? e.items.maintenance : null,
                 next_maintenance_at: e.items ? e.items.next_maintenance_at : null,
+                // 報價單：費用佐證文件（任何格式），掛在工項上，多份
+                quotes: e.items ? e.items.quotes : null,
             };
         }
 
@@ -1893,6 +1917,7 @@
                 ${(cost || it.status !== '_loose') ? `<div class="it-cost sheet-cost">${cost || '💰 尚未填費用'}
                     <button type="button" class="ghost small" data-cost-edit="${esc(it.itemId)}">${cost ? '改費用' : '填費用'}</button></div>` : ''}
                 ${costEditHtml(it)}
+                ${quoteBlock(it)}
                 ${todoBlock(it)}
                 ${it.logs.map(boardRecord).join('')}`;
         }
@@ -1955,6 +1980,87 @@
                 await loadEntries();   // 重撈 → 看板與浮層一起更新
             } catch (err) {
                 say('listMsg', '費用儲存失敗：' + err.message, 'error');
+            }
+        }
+
+        // ---------- 報價單（工項的費用佐證，任何格式、多份）----------
+        // 掛在 items.quotes（jsonb 陣列 [{ name, url }]）；檔案放 log-photos bucket（公開，路徑 quotes/ 前綴）
+        function quoteBlock(it) {
+            if (it.status === '_loose' || !HAS_QUOTES) return '';
+            const qs = it.quotes || [];
+            const list = qs.length
+                ? `<div class="quote-list">${qs.map((q, idx) => `
+                    <div class="quote-row">
+                        <a href="${esc(q.url || '')}" target="_blank" rel="noopener" class="quote-name">📄 ${esc(q.name || ('報價單 ' + (idx + 1)))}</a>
+                        <button type="button" class="ghost small" data-quote-del="${esc(it.itemId)}" data-quote-url="${esc(q.url || '')}">刪除</button>
+                    </div>`).join('')}</div>`
+                : '<div class="hint">尚無報價單。</div>';
+            return `<div class="quote-block">
+                <div class="quote-head">📎 報價單${qs.length ? '（' + qs.length + '）' : ''}</div>
+                ${list}
+                <label class="quote-add">＋ 上傳報價單（任何檔案）
+                    <input type="file" multiple data-quote-file="${esc(it.itemId)}" style="display:none">
+                </label>
+            </div>`;
+        }
+
+        // 上傳報價單：原檔上傳（不壓縮）→ items.quotes 追加（不覆蓋既有）
+        async function uploadQuote(itemId, fileList) {
+            if (!fileList || !fileList.length) return;
+            const it = findBoardItem(itemId);
+            const files = Array.from(fileList);
+            say('listMsg', `上傳報價單中（0/${files.length}）…`, 'info');
+            try {
+                const added = [];
+                let done = 0;
+                for (const f of files) {
+                    const ext = (f.name.split('.').pop() || 'bin').toLowerCase().slice(0, 10);
+                    const path = `quotes/${itemId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+                    const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, f, {
+                        cacheControl: '31536000', upsert: false,
+                        contentType: f.type || 'application/octet-stream'
+                    });
+                    if (error) throw new Error(`（${f.name}）${error.message}`);
+                    const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+                    added.push({ name: f.name, url: data.publicUrl });
+                    done++;
+                    say('listMsg', `上傳報價單中（${done}/${files.length}）…`, 'info');
+                }
+                const existing = (it && Array.isArray(it.quotes)) ? it.quotes : [];
+                const { error } = await supabase.from('items')
+                    .update({ quotes: existing.concat(added) }).eq('id', itemId).select('id');
+                if (error) throw error;
+                say('listMsg', `✅ 已上傳 ${added.length} 份報價單`, 'ok');
+                await loadEntries();
+            } catch (err) {
+                say('listMsg', '報價單上傳失敗：' + err.message, 'error');
+            }
+        }
+
+        // 刪除報價單：Storage 檔 + items.quotes 移除該筆
+        async function deleteQuote(itemId, url) {
+            if (!url) return;
+            if (!confirm('刪除這份報價單？')) return;
+            const path = publicPathOf(url);
+            const it = findBoardItem(itemId);
+            const existing = (it && Array.isArray(it.quotes)) ? it.quotes : [];
+            const keep = existing.filter(q => q.url !== url);
+            try {
+                if (path) {
+                    const { data: removed, error } = await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+                    if (error) throw error;
+                    // 缺少 DELETE 政策時 remove 不報錯只回空陣列 → 比對長度才知道有沒有刪成
+                    if (!removed || !removed.length) {
+                        say('listMsg', '⚠️ 檔案沒刪成（可能缺 Storage 刪除權限），但紀錄已移除', 'error');
+                    }
+                }
+                const { error } = await supabase.from('items')
+                    .update({ quotes: keep }).eq('id', itemId).select('id');
+                if (error) throw error;
+                say('listMsg', '報價單已刪除', 'ok');
+                await loadEntries();
+            } catch (err) {
+                say('listMsg', '報價單刪除失敗：' + err.message, 'error');
             }
         }
 
@@ -2056,6 +2162,16 @@
             // 維修工項浮層：儲存「下次維修時間」
             box.querySelectorAll('[data-maint-save]').forEach(btn => {
                 btn.onclick = () => saveMaintNext(btn.getAttribute('data-maint-save'));
+            });
+            // 報價單：上傳（任何檔案，多選）+ 刪除
+            box.querySelectorAll('[data-quote-file]').forEach(inp => {
+                inp.onchange = () => {
+                    uploadQuote(inp.getAttribute('data-quote-file'), inp.files);
+                    inp.value = '';
+                };
+            });
+            box.querySelectorAll('[data-quote-del]').forEach(btn => {
+                btn.onclick = () => deleteQuote(btn.getAttribute('data-quote-del'), btn.getAttribute('data-quote-url'));
             });
             const cancel = box.querySelector('[data-cancel-edit]');
             if (cancel) cancel.onclick = () => {

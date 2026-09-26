@@ -40,6 +40,15 @@ function todoLines(v) {
         .filter(Boolean);
 }
 
+// 報價單列表：items.quotes 是 jsonb 陣列 [{ name, url }]；也可能是字串（保險 parse）
+function quoteList(v) {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string' && v) {
+        try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }
+    }
+    return [];
+}
+
 // 開案時間＝**卡片建立日** 與 **最早那筆紀錄的日期** 取較早的。
 // 為什麼：卡片可能是今天才補建的（例如舊紀錄事後才補上工項），
 // 那時候「開案」其實是紀錄那天，不是今天。
@@ -86,6 +95,7 @@ function buildTree(logs) {
             days: daysSince(openingOf(sorted, last)),
             maintenance: !!last.maintenance,
             next_maintenance_at: last.next_maintenance_at || null,
+            quotes: quoteList(last.quotes),
         });
     }
     for (const g of groups) {
