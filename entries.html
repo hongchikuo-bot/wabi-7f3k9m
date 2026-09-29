@@ -228,6 +228,8 @@
         .flag-block { margin: 0.6rem 0; padding: 0.6rem; border: 1px dashed var(--color-line); border-radius: 6px; display: flex; flex-direction: column; gap: 0.4rem; }
         .flag-block .check-line { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--color-accent); cursor: pointer; }
         .flag-block .verify-name { width: 96px; padding: 0.15rem 0.4rem; font-size: 0.78rem; border: 1px solid var(--color-line); border-radius: 4px; cursor: text; }
+        .flag-block .pdf-link { font-size: 0.78rem; }
+        .flag-block .pdf-link a { color: var(--color-accent); text-decoration: underline; }
         /* 需注意 → 卡片變色凸顯 */
         .item-row.need-attention { background: #f6e6c4; border-left: 3px solid #d9a441; padding-left: 0.5rem; }
         .flag-warn { font-size: 0.72rem; color: #a06a00; font-weight: 600; white-space: nowrap; }
@@ -567,6 +569,7 @@
         <div class="sheet-box" id="sheetBox"></div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
     <script src="board.js"></script>
     <script type="module">
         import { supabase } from './supabase-client.js';
@@ -1583,7 +1586,7 @@
                        + recCol + ', log_photos(' + photoCols + '), '
                        + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at'
                        + (HAS_QUOTES ? ', quotes' : '')
-                       + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done, verified, verified_by' : '') + ')')
+                       + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done, verified, verified_by, need_attention_pdf' : '') + ')')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
@@ -1706,6 +1709,7 @@
                 payment_done: e.items ? e.items.payment_done : null,
                 verified: e.items ? e.items.verified : null,
                 verified_by: e.items ? e.items.verified_by : null,
+                need_attention_pdf: e.items ? e.items.need_attention_pdf : null,
             };
         }
 
@@ -2184,6 +2188,7 @@
                     <input type="text" class="verify-name" data-verify-name="${esc(it.itemId)}" value="${esc(it.verified_by || '')}" placeholder="核對人">
                 </label>
                 <label class="check-line"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需注意（整張卡變色凸顯）</label>
+                ${it.need_attention_pdf ? `<div class="pdf-link"><a href="${esc(it.need_attention_pdf)}" target="_blank" rel="noopener">📄 付款注意單 PDF</a></div>` : ''}
                 <label class="check-line"><input type="checkbox" data-flag="payment_done" data-flag-item="${esc(it.itemId)}"${it.payment_done ? ' checked' : ''}>完成付款（恢復卡片顏色）</label>
             </div>`;
         }
@@ -2193,7 +2198,12 @@
                 const { error } = await supabase.from('items')
                     .update({ [field]: checked }).eq('id', itemId).select('id');
                 if (error) throw error;
-                await loadEntries();
+                // 勾「需注意」→ 順手產生付款注意單 PDF（內部會重繪）
+                if (field === 'need_attention' && checked) {
+                    await generatePdf(itemId);
+                } else {
+                    await loadEntries();
+                }
             } catch (err) {
                 say('listMsg', '標記更新失敗：' + err.message, 'error');
             }
@@ -2207,6 +2217,72 @@
                 if (error) throw error;
             } catch (err) {
                 say('listMsg', '核對人儲存失敗：' + err.message, 'error');
+            }
+        }
+
+        // 勾「需注意」→ 產生付款注意單 PDF（施工事項＋價位＋報價單），上傳 storage 並存 items.need_attention_pdf
+        async function generatePdf(itemId) {
+            const it = findBoardItem(itemId);
+            if (!it) return;
+            const last = it.logs && it.logs[it.logs.length - 1];
+            const src = last && last.src;
+            const desc = (src && src.main_description) || '';
+            const quotes = it.quotes || [];
+            const fmtAmt = (v, cur) => {
+                if (v === null || v === undefined || v === '') return '—';
+                const n = Number(v);
+                const neg = n < 0;
+                const base = (neg ? '-' : '') + currencySymbol(cur) + money(Math.abs(n));
+                const t = toTWD(v, cur);
+                return t !== null ? `${base}（約 NT$${money(t)}）` : base;
+            };
+            const unpaid = last ? ((Number(last.fin) || 0) - (Number(last.paid) || 0)) : null;
+            const html = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:24px;color:#3d352d;font-size:14px;line-height:1.9;">
+                <h2 style="margin:0 0 14px;font-size:20px;">付款注意單</h2>
+                <div><b>工項：</b>${esc(it.title)}</div>
+                ${it.loc ? `<div><b>地點：</b>${esc(it.loc)}</div>` : ''}
+                ${it.opening ? `<div><b>開案：</b>${esc(fmtMonthDay(it.opening))}</div>` : ''}
+                <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
+                <div><b>施工事項：</b></div>
+                <div style="white-space:pre-wrap;">${desc ? esc(desc) : '（無描述）'}</div>
+                <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
+                <div><b>價位</b></div>
+                <div>工程款：${fmtAmt(last && last.fin, last && last.final_currency)}</div>
+                <div>已付：${fmtAmt(last && last.paid, last && last.final_currency)}</div>
+                <div>未付：${fmtAmt(unpaid, last && last.final_currency)}</div>
+                <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
+                <div><b>需付款帳號：</b>詳見報價單</div>
+                ${quotes.length ? `<div>報價單：${quotes.map(q => esc(q.name)).join('、')}</div>` : '<div>（尚無報價單）</div>'}
+            </div>`;
+            const holder = document.createElement('div');
+            holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:600px;background:#fff;';
+            holder.innerHTML = html;
+            document.body.appendChild(holder);
+            try {
+                if (!window.html2pdf) throw new Error('PDF 元件還沒載入（重新整理再試）');
+                const worker = window.html2pdf().set({
+                    margin: 8, image: { type: 'jpeg', quality: 0.95 },
+                    html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                }).from(holder).toPdf();
+                const pdf = await worker.get('pdf');
+                const blob = pdf.output('blob');
+                if (!blob) throw new Error('PDF 生成失敗');
+                const path = `quotes/${itemId}/付款注意單-${Date.now()}.pdf`;
+                const file = new File([blob], '付款注意單.pdf', { type: 'application/pdf' });
+                const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
+                    cacheControl: '31536000', upsert: false, contentType: 'application/pdf'
+                });
+                if (error) throw error;
+                const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+                const { error: ue } = await supabase.from('items')
+                    .update({ need_attention_pdf: data.publicUrl }).eq('id', itemId).select('id');
+                if (ue) throw ue;
+                say('listMsg', '✅ 已產生付款注意單 PDF', 'ok');
+                await loadEntries();
+            } catch (err) {
+                say('listMsg', 'PDF 生成失敗：' + err.message, 'error');
+            } finally {
+                holder.remove();
             }
         }
 

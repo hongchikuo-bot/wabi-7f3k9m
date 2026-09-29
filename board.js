@@ -125,6 +125,7 @@ function buildTree(logs) {
             payment_done: !!last.payment_done,
             verified: !!last.verified,
             verified_by: last.verified_by || null,
+            need_attention_pdf: last.need_attention_pdf || null,
         });
     }
     for (const g of groups) {
