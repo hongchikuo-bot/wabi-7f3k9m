@@ -123,6 +123,8 @@ function buildTree(logs) {
             final_currency: last.final_currency || null,
             need_attention: !!last.need_attention,
             payment_done: !!last.payment_done,
+            verified: !!last.verified,
+            verified_by: last.verified_by || null,
         });
     }
     for (const g of groups) {
