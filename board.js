@@ -49,6 +49,29 @@ function quoteList(v) {
     return [];
 }
 
+// HTML 轉義（board.js 是 classic script，跟兩頁的 esc 各自獨立，避免全域污染）
+function htmlEscape(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
+// 報價單縮圖：圖片直接顯示、PDF 用內嵌預覽、其它格式顯示檔案圖示。
+// 回傳 HTML 片段；CSS 由兩頁各自定義（.quote-thumb）。
+function quoteThumb(q) {
+    const name = String((q && q.name) || '');
+    const url = String((q && q.url) || '');
+    const ext = name.split('.').pop().toLowerCase();
+    const su = htmlEscape(url), sn = htmlEscape(name);
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif'].includes(ext)) {
+        return `<img class="quote-thumb" src="${su}" alt="${sn}" loading="lazy" onerror="this.style.display='none'">`;
+    }
+    if (ext === 'pdf') {
+        return `<iframe class="quote-thumb" src="${su}" title="${sn}" loading="lazy"></iframe>`;
+    }
+    return `<span class="quote-thumb quote-thumb-icon">📄</span>`;
+}
+
 // 開案時間＝**卡片建立日** 與 **最早那筆紀錄的日期** 取較早的。
 // 為什麼：卡片可能是今天才補建的（例如舊紀錄事後才補上工項），
 // 那時候「開案」其實是紀錄那天，不是今天。
@@ -96,6 +119,9 @@ function buildTree(logs) {
             maintenance: !!last.maintenance,
             next_maintenance_at: last.next_maintenance_at || null,
             quotes: quoteList(last.quotes),
+            currency: last.currency || null,
+            need_attention: !!last.need_attention,
+            payment_done: !!last.payment_done,
         });
     }
     for (const g of groups) {

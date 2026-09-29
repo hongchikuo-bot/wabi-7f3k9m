@@ -293,6 +293,10 @@
             display: flex; flex-direction: column; gap: 0.25rem;
         }
         .pub-quotes a { color: var(--color-accent); text-decoration: underline; overflow-wrap: anywhere; }
+        .pub-quote-row { display: flex; align-items: flex-start; gap: 0.5rem; }
+        .pub-quote-row a { align-self: center; }
+        .quote-thumb { display: block; max-width: 120px; max-height: 80px; border-radius: 4px; object-fit: cover; flex: none; }
+        .quote-thumb-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; font-size: 1.5rem; color: var(--color-muted); border: 1px solid var(--color-line); border-radius: 4px; }
         @media (max-width: 700px) { .pub-quotes { font-size: 0.72rem; } }
         .chip.doing { background: rgba(191, 139, 46, 0.22); color: #8a6a1e; }
         .chip.paused { background: rgba(139, 46, 46, 0.15); color: #8b5454; }
@@ -583,7 +587,7 @@
             const qs = it.quotes || [];
             if (!qs.length) return '';
             return `<div class="pub-quotes">${qs.map(q =>
-                `<a href="${esc(q.url || '')}" target="_blank" rel="noopener">📄 ${esc(q.name || '報價單')}</a>`
+                `<div class="pub-quote-row">${quoteThumb(q)}<a href="${esc(q.url || '')}" target="_blank" rel="noopener">${esc(q.name || '報價單')}</a></div>`
             ).join('')}</div>`;
         }
 
