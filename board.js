@@ -119,7 +119,8 @@ function buildTree(logs) {
             maintenance: !!last.maintenance,
             next_maintenance_at: last.next_maintenance_at || null,
             quotes: quoteList(last.quotes),
-            currency: last.currency || null,
+            estimate_currency: last.estimate_currency || null,
+            final_currency: last.final_currency || null,
             need_attention: !!last.need_attention,
             payment_done: !!last.payment_done,
         });

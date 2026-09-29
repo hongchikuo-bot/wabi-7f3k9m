@@ -201,6 +201,9 @@
         .cost-edit { margin: 0.6rem 0; padding: 0.7rem; border: 1px dashed var(--color-line); border-radius: 6px; }
         .cost-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
         .cost-edit-grid label { font-size: 0.78rem; color: var(--color-accent); display: flex; flex-direction: column; gap: 0.25rem; }
+        .cur-amt { display: flex; align-items: center; gap: 0.4rem; }
+        .cur-amt select { width: auto; }
+        .cur-amt input { flex: 1; min-width: 0; }
         .cost-edit-actions { display: flex; gap: 0.5rem; }
         .cost-edit-actions button { width: auto; }
         /* 報價單（工項浮層費用佐證） */
@@ -1579,7 +1582,7 @@
                        + recCol + ', log_photos(' + photoCols + '), '
                        + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at'
                        + (HAS_QUOTES ? ', quotes' : '')
-                       + (HAS_CURRENCY ? ', currency, need_attention, payment_done' : '') + ')')
+                       + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done' : '') + ')')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
@@ -1695,8 +1698,9 @@
                 next_maintenance_at: e.items ? e.items.next_maintenance_at : null,
                 // 報價單：費用佐證文件（任何格式），掛在工項上，多份
                 quotes: e.items ? e.items.quotes : null,
-                // 費用幣別 + 需注意/完成付款（掛在工項上）
-                currency: e.items ? e.items.currency : null,
+                // 費用幣別（預估款、工程款各自有；已付款項跟著工程款）+ 需注意/完成付款（掛在工項上）
+                estimate_currency: e.items ? e.items.estimate_currency : null,
+                final_currency: e.items ? e.items.final_currency : null,
                 need_attention: e.items ? e.items.need_attention : null,
                 payment_done: e.items ? e.items.payment_done : null,
             };
@@ -1708,31 +1712,31 @@
         // 費用在工項卡上的摘要：預估款 · 工程款 · 已付 · 未付（未付＝工程款−已付）
         // 只要三個數字有任何一個有填，就顯示一整行；全部空白才不顯示。
         // currency 非台幣時，每個金額後面多帶「≈ NT$」換算。
-        function costLine(est, fin, paid, currency) {
+        function costLine(est, fin, paid, estCur, finCur) {
             const hasEst = est !== null && est !== undefined && est !== '';
             const hasFin = fin !== null && fin !== undefined && fin !== '';
             const hasPaid = paid !== null && paid !== undefined && paid !== '';
             if (!hasEst && !hasFin && !hasPaid) return '';
             const unpaid = (hasFin ? Number(fin) : 0) - (hasPaid ? Number(paid) : 0);
-            const sym = currencySymbol(currency);
             // 帶幣別符號 + 負號在最前（-NT$10,000 而非 NT$-10,000）
             const fmtMoney = (v, symbol) => {
                 const n = Number(v);
                 return (n < 0 ? '-' : '') + symbol + money(Math.abs(n));
             };
-            const fmt = v => {
-                const t = toTWD(v, currency);
-                return `<b>${fmtMoney(v, sym)}</b>`
+            // 每個金額用自己的幣別；非台幣時補「≈ NT$」換算。已付/未付跟著工程款幣別。
+            const fmt = (v, cur) => {
+                const t = toTWD(v, cur);
+                return `<b>${fmtMoney(v, currencySymbol(cur))}</b>`
                     + (t !== null ? ` <span class="twd">≈ ${fmtMoney(t, 'NT$')}</span>` : '');
             };
             const parts = [];
-            if (hasEst) parts.push(`預估 ${fmt(est)}`);
-            if (hasFin) parts.push(`工程款 ${fmt(fin)}`);
-            if (hasPaid) parts.push(`已付 ${fmt(paid)}`);
+            if (hasEst) parts.push(`預估 ${fmt(est, estCur)}`);
+            if (hasFin) parts.push(`工程款 ${fmt(fin, finCur)}`);
+            if (hasPaid) parts.push(`已付 ${fmt(paid, finCur)}`);
             if (hasFin || hasPaid) {
                 const cls = unpaid > 0 ? 'over' : (unpaid < 0 ? 'under' : '');
-                const t = toTWD(unpaid, currency);
-                parts.push(`未付 <b class="${cls}">${fmtMoney(unpaid, sym)}</b>`
+                const t = toTWD(unpaid, finCur);
+                parts.push(`未付 <b class="${cls}">${fmtMoney(unpaid, currencySymbol(finCur))}</b>`
                     + (t !== null ? ` <span class="twd">≈ ${fmtMoney(t, 'NT$')}</span>` : ''));
             }
             return parts.join(' · ');
@@ -1898,7 +1902,7 @@
             const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`;
             // 費用（掛在工項上；同一工項每筆 log 的費用一樣，取最後一筆）
             const last = it.logs && it.logs[it.logs.length - 1];
-            const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.currency) : '';
+            const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.estimate_currency, last.final_currency) : '';
             // 維修工項（maintenance=true 且未完成）：顯示 🔧 + 下次時間；快到黃、逾期紅
             const maint = (it.maintenance && it.status !== 'completed')
                 ? maintLine(it.next_maintenance_at) : '';
@@ -1972,7 +1976,7 @@
                 it.byNames.length ? it.byNames.join('、') : '',
             ].filter(Boolean).join(' · ');
             const last = it.logs && it.logs[it.logs.length - 1];
-            const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.currency) : '';
+            const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.estimate_currency, last.final_currency) : '';
             return `
                 <div class="sheet-head">
                     <span class="sheet-title">${esc(it.title)}</span>
@@ -2025,17 +2029,21 @@
             if (it.status === '_loose') return '';
             const last = it.logs && it.logs[it.logs.length - 1];
             const item = (last && last.src && last.src.items) || {};
-            const cur = item.currency || '';
-            const curSel = HAS_CURRENCY
-                ? `<label>幣別<select data-cost-currency>${CURRENCY_OPTIONS.map(([v, l]) =>
-                    `<option value="${v}"${cur === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>`
-                : '';
+            const estCur = item.estimate_currency || '';
+            const finCur = item.final_currency || '';
+            const curOpts = k => CURRENCY_OPTIONS.map(([v, l]) =>
+                `<option value="${v}"${k === v ? ' selected' : ''}>${l}</option>`).join('');
             return `<div class="cost-edit hidden" data-cost-edit-box="${esc(it.itemId)}">
                 <div class="cost-edit-grid">
-                    ${curSel}
-                    <label>預估款<input type="number" data-cost-field="estimated_cost" value="${esc(item.estimated_cost ?? '')}" min="0" step="1" placeholder="0"></label>
-                    <label>工程款<input type="number" data-cost-field="final_cost" value="${esc(item.final_cost ?? '')}" min="0" step="1" placeholder="0"></label>
-                    <label>已付<input type="number" data-cost-field="paid_amount" value="${esc(item.paid_amount ?? '')}" min="0" step="1" placeholder="0"></label>
+                    <label>預估款
+                        <span class="cur-amt">${HAS_CURRENCY ? `<select data-cost-currency="estimate">${curOpts(estCur)}</select>` : ''}
+                        <input type="number" data-cost-field="estimated_cost" value="${esc(item.estimated_cost ?? '')}" min="0" step="1" placeholder="0"></span>
+                    </label>
+                    <label>工程款
+                        <span class="cur-amt">${HAS_CURRENCY ? `<select data-cost-currency="final">${curOpts(finCur)}</select>` : ''}
+                        <input type="number" data-cost-field="final_cost" value="${esc(item.final_cost ?? '')}" min="0" step="1" placeholder="0"></span>
+                    </label>
+                    <label>已付（幣別＝工程款）<input type="number" data-cost-field="paid_amount" value="${esc(item.paid_amount ?? '')}" min="0" step="1" placeholder="0"></label>
                 </div>
                 ${rateRow()}
                 <div class="cost-edit-actions">
@@ -2064,11 +2072,14 @@
             for (const [v, label] of [[est, '預估款'], [fin, '工程款'], [paid, '已付']]) {
                 if (v !== null && (!isFinite(v) || v < 0)) { say('listMsg', label + '必須是 0 以上的數字', 'error'); return; }
             }
-            const curEl = box.querySelector('[data-cost-currency]');
-            const currency = (curEl && curEl.value) || null;
+            const curEst = box.querySelector('[data-cost-currency="estimate"]');
+            const curFin = box.querySelector('[data-cost-currency="final"]');
             try {
                 const payload = { estimated_cost: est, final_cost: fin, paid_amount: paid };
-                if (HAS_CURRENCY) payload.currency = currency;
+                if (HAS_CURRENCY) {
+                    payload.estimate_currency = (curEst && curEst.value) || null;
+                    payload.final_currency = (curFin && curFin.value) || null;
+                }
                 const { error } = await supabase.from('items')
                     .update(payload).eq('id', itemId).select('id');
                 if (error) throw error;
