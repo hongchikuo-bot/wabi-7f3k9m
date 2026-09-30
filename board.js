@@ -126,6 +126,7 @@ function buildTree(logs) {
             verified: !!last.verified,
             verified_by: last.verified_by || null,
             need_attention_pdf: last.need_attention_pdf || null,
+            payment_receipt: last.payment_receipt || null,
         });
     }
     for (const g of groups) {
