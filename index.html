@@ -187,6 +187,7 @@
 
         /* ---------------- 樹狀：狀態 → 工項 → 紀錄 ---------------- */
         .tree-hint { font-size: 0.8rem; color: var(--color-muted); margin: -0.6rem 0 1.4rem; }
+        .attention-legend { font-size: 0.82rem; color: #a06a00; background: #f6e6c4; border: 1px solid #d9a441; border-radius: 6px; padding: 0.4rem 0.7rem; margin: -0.4rem 0 1.2rem; }
         /* 看板：四個狀態**永遠**並排（手機也一樣，不要左右滑） */
         .tree {
             display: grid;
@@ -451,6 +452,7 @@
     <section id="progress">
         <h2 class="section-title">工程進度</h2>
         <div class="tree-hint">依狀態分組。點工項看每個日期的紀錄與照片。</div>
+        <div class="attention-legend">⚠️ 若有黃色卡片，表示需要業主注意</div>
         <div id="progressList"><div class="loading">正在讀取紀錄...</div></div>
     </section>
 
