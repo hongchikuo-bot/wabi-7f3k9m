@@ -899,7 +899,7 @@
             if (found) { ITEMS_BY_ID.set(found.id, found); return found; }
 
             const { data: created, error: cErr } = await supabase.from('items')
-                .insert([{ project_id: projectId, node_id: nodeId, title: wt, work_type: wt, status: 'in_progress' }])
+                .insert([{ project_id: projectId, node_id: nodeId, title: wt, work_type: wt, status: null }])
                 .select().single();
             if (cErr) {
                 // 23505 = 唯一限制（例如 UNIQUE(node_id, title)）→ 可能另一邊剛好建好了，再查一次
