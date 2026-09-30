@@ -121,6 +121,7 @@ function buildTree(logs) {
             quotes: quoteList(last.quotes),
             cost_compare: quoteList(last.cost_compare),
             procurement_public: !!last.procurement_public,
+            completed_by: last.completed_by || null,
             estimate_currency: last.estimate_currency || null,
             final_currency: last.final_currency || null,
             need_attention: !!last.need_attention,

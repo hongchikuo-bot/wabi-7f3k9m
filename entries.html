@@ -667,6 +667,7 @@
             await probePaymentFields();
             await probeCostCompare();
             await probeProcurementPublic();
+            await probeCompletedBy();
             if (HAS_CURRENCY) await loadRates();
             if (!HAS_TODOS) await loadTodos();   // 先探一次（失敗也無所謂，畫面照常）
             await fetchMyName();
@@ -1234,6 +1235,15 @@
             return HAS_PROCUREMENT_PUBLIC;
         }
 
+        // 結案執行者（items.completed_by），獨立偵測
+        let HAS_COMPLETED_BY = false;
+
+        async function probeCompletedBy() {
+            const { error } = await supabase.from('items').select('completed_by').limit(0);
+            HAS_COMPLETED_BY = !error;
+            return HAS_COMPLETED_BY;
+        }
+
         // 自己的顯示名稱（profiles 的 SELECT 政策允許讀「本人」）
         async function fetchMyName() {
             try {
@@ -1645,7 +1655,8 @@
                        + (HAS_ATTENTION_PDF ? ', need_attention_pdf' : '')
                        + (HAS_PAYMENT_FIELDS ? ', payment_account, payment_amount, pdf_note' : '')
                        + (HAS_COST_COMPARE ? ', cost_compare' : '')
-                       + (HAS_PROCUREMENT_PUBLIC ? ', procurement_public' : '') + ')')
+                       + (HAS_PROCUREMENT_PUBLIC ? ', procurement_public' : '')
+                       + (HAS_COMPLETED_BY ? ', completed_by' : '') + ')')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
@@ -1775,6 +1786,7 @@
                 pdf_note: e.items ? e.items.pdf_note : null,
                 cost_compare: e.items ? e.items.cost_compare : null,
                 procurement_public: e.items ? e.items.procurement_public : null,
+                completed_by: e.items ? e.items.completed_by : null,
             };
         }
 
@@ -1977,6 +1989,7 @@
             if (it.status !== 'completed' && it.days !== null) meta.push('已 ' + it.days + ' 天');
             meta.push(it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片');
             if (it.byNames.length) meta.push(it.byNames.join('、'));
+            if (it.completed_by) meta.push('結案：' + it.completed_by);
             const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`;
             // 費用（掛在工項上；同一工項每筆 log 的費用一樣，取最後一筆）
             const last = it.logs && it.logs[it.logs.length - 1];
@@ -2052,6 +2065,7 @@
                 it.days !== null && it.status !== 'completed' ? '已 ' + it.days + ' 天' : '',
                 it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片',
                 it.byNames.length ? it.byNames.join('、') : '',
+                it.completed_by ? '結案：' + it.completed_by : '',
             ].filter(Boolean).join(' · ');
             const last = it.logs && it.logs[it.logs.length - 1];
             const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.estimate_currency, last.final_currency) : '';
@@ -2373,6 +2387,7 @@
                     <input type="checkbox" data-flag="verified" data-flag-item="${esc(it.itemId)}"${it.verified ? ' checked' : ''}>已核對
                     <input type="text" class="verify-name" data-verify-name="${esc(it.itemId)}" value="${esc(it.verified_by || '')}" placeholder="核對人">
                 </label>
+                ${HAS_COMPLETED_BY ? `<label class="check-line">結案執行者 <input type="text" class="verify-name" data-completed-by="${esc(it.itemId)}" value="${esc(it.completed_by || '')}" placeholder="填名字"></label>` : ''}
                 <label class="check-line"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需注意（整張卡變色凸顯）</label>
                 ${HAS_PAYMENT_FIELDS ? `
                 <div class="pay-fields">
@@ -2410,6 +2425,17 @@
                 if (error) throw error;
             } catch (err) {
                 say('listMsg', '核對人儲存失敗：' + err.message, 'error');
+            }
+        }
+
+        // 結案執行者：填完（離開輸入框）就存
+        async function saveCompletedBy(itemId, name) {
+            try {
+                const { error } = await supabase.from('items')
+                    .update({ completed_by: String(name || '').trim() || null }).eq('id', itemId).select('id');
+                if (error) throw error;
+            } catch (err) {
+                say('listMsg', '結案執行者儲存失敗：' + err.message, 'error');
             }
         }
 
@@ -2845,6 +2871,10 @@
             // 核對人名字：填完即存
             box.querySelectorAll('[data-verify-name]').forEach(inp => {
                 inp.onchange = () => saveVerifyName(inp.getAttribute('data-verify-name'), inp.value);
+            });
+            // 結案執行者：填完即存
+            box.querySelectorAll('[data-completed-by]').forEach(inp => {
+                inp.onchange = () => saveCompletedBy(inp.getAttribute('data-completed-by'), inp.value);
             });
             // 匯率：改了即存（全站通用）
             box.querySelectorAll('[data-rate-key]').forEach(inp => {

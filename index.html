@@ -661,6 +661,7 @@
             if (openTodos.length) meta.push('待辦 ' + openTodos.length + ' 項');
             meta.push(it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片');
             if (it.byNames.length) meta.push(it.byNames.join('、'));
+            if (it.completed_by) meta.push('結案：' + it.completed_by);
             if ((it.quotes || []).length) meta.push('報價單 ' + it.quotes.length + ' 份');
             // 窄螢幕（欄位 ~90px）用短版摘要，不然整段文字會折成一團
             const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`
@@ -754,6 +755,7 @@
                 it.opening ? fmtMonthDay(it.opening) + ' 開案' : '',
                 it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片',
                 it.byNames.join('、'),
+                it.completed_by ? '結案：' + it.completed_by : '',
             ].filter(Boolean).join(' · ');
             box.innerHTML = `
                 <div class="sheet-head">
