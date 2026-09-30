@@ -569,7 +569,8 @@
         <div class="sheet-box" id="sheetBox"></div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="board.js"></script>
     <script type="module">
         import { supabase } from './supabase-client.js';
@@ -2250,8 +2251,9 @@
                 return t !== null ? `${base}（約 NT$${money(t)}）` : base;
             };
             const unpaid = last ? ((Number(last.fin) || 0) - (Number(last.paid) || 0)) : null;
-            const html = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:24px;color:#3d352d;font-size:14px;line-height:1.9;">
-                <h2 style="margin:0 0 14px;font-size:20px;">付款注意單</h2>
+            const verifiedBy = (it.verified && it.verified_by) ? String(it.verified_by).trim() : '';
+            const html = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:28px;color:#3d352d;font-size:14px;line-height:1.9;">
+                <h2 style="margin:0 0 16px;font-size:22px;text-align:center;">付款摘要</h2>
                 <div><b>工項：</b>${esc(it.title)}</div>
                 ${it.loc ? `<div><b>地點：</b>${esc(it.loc)}</div>` : ''}
                 ${it.opening ? `<div><b>開案：</b>${esc(fmtMonthDay(it.opening))}</div>` : ''}
@@ -2259,27 +2261,41 @@
                 <div><b>施工事項：</b></div>
                 <div style="white-space:pre-wrap;">${desc ? esc(desc) : '（無描述）'}</div>
                 <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
-                <div><b>價位</b></div>
+                <div><b>付款金額</b></div>
                 <div>工程款：${fmtAmt(last && last.fin, last && last.final_currency)}</div>
                 <div>已付：${fmtAmt(last && last.paid, last && last.final_currency)}</div>
                 <div>未付：${fmtAmt(unpaid, last && last.final_currency)}</div>
                 <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
-                <div><b>需付款帳號：</b>詳見報價單</div>
+                <div><b>付款帳戶：</b>詳見報價單</div>
                 ${quotes.length ? `<div>報價單：${quotes.map(q => esc(q.name)).join('、')}</div>` : '<div>（尚無報價單）</div>'}
+                <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
+                <div><b>核對人員：</b>${verifiedBy ? esc(verifiedBy) : '（尚未核對）'}</div>
             </div>`;
             const holder = document.createElement('div');
             holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:600px;background:#fff;';
             holder.innerHTML = html;
             document.body.appendChild(holder);
             try {
-                if (!window.html2pdf) throw new Error('PDF 元件還沒載入（重新整理再試）');
-                const blob = await window.html2pdf().set({
-                    margin: 8, image: { type: 'jpeg', quality: 0.95 },
-                    html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-                }).from(holder).outputPdf('blob');
-                if (!blob) throw new Error('PDF 生成失敗');
-                const path = `quotes/${itemId}/payment-${Date.now()}.pdf`;
-                const file = new File([blob], '付款注意單.pdf', { type: 'application/pdf' });
+                if (!window.html2canvas || !window.jspdf) throw new Error('PDF 元件還沒載入（重新整理再試）');
+                const canvas = await window.html2canvas(holder, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+                if (!canvas || !canvas.width || !canvas.height) throw new Error('PDF 渲染失敗（內容空白）');
+                const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+                const margin = 8;
+                const pageW = 210 - margin * 2;
+                const pageH = 297 - margin * 2;
+                const imgW = pageW;
+                const imgH = canvas.height * imgW / canvas.width;
+                if (imgH <= pageH) {
+                    pdf.addImage(imgData, 'JPEG', margin, margin, imgW, imgH);
+                } else {
+                    const s = pageH / imgH;
+                    pdf.addImage(imgData, 'JPEG', margin, margin, imgW * s, pageH);
+                }
+                const blob = pdf.output('blob');
+                const path = `quotes/${itemId}/payment-summary-${Date.now()}.pdf`;
+                const file = new File([blob], '付款摘要.pdf', { type: 'application/pdf' });
                 const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
                     cacheControl: '31536000', upsert: false, contentType: 'application/pdf'
                 });
