@@ -684,6 +684,10 @@
             const box = document.getElementById('progressList');
             if (!box) return;
             const groups = buildTree(logs);
+            // 篩選：採購工項（title=採購）未打「公開給業主看」→ 不顯示（業主看不到）
+            for (const g of groups) {
+                g.items = g.items.filter(it => !(it.title === '採購' && it.procurement_public !== true));
+            }
             // 待辦掛在工項上（buildTree 不管待辦，這裡接上去）
             for (const g of groups) {
                 for (const it of g.items) {

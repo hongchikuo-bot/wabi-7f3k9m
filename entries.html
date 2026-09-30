@@ -226,6 +226,9 @@
         .rate-row label { display: inline-flex; align-items: center; gap: 0.3rem; }
         .rate-row input { width: 90px; }
         .rate-row .hint { font-size: 0.7rem; color: var(--color-muted); }
+        /* 採購工項的公開開關 */
+        .procurement-toggle { margin: 0.4rem 0; padding: 0.5rem 0.6rem; border: 1px dashed #d9a441; border-radius: 6px; background: #fff9ec; }
+        .procurement-toggle .check-line { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: #a06a00; cursor: pointer; }
         /* 需注意/完成付款 勾選框區塊 */
         .flag-block { margin: 0.6rem 0; padding: 0.6rem; border: 1px dashed var(--color-line); border-radius: 6px; display: flex; flex-direction: column; gap: 0.4rem; }
         .flag-block .check-line { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--color-accent); cursor: pointer; }
@@ -663,6 +666,7 @@
             await probeAttentionPdf();
             await probePaymentFields();
             await probeCostCompare();
+            await probeProcurementPublic();
             if (HAS_CURRENCY) await loadRates();
             if (!HAS_TODOS) await loadTodos();   // 先探一次（失敗也無所謂，畫面照常）
             await fetchMyName();
@@ -1221,6 +1225,15 @@
             return HAS_COST_COMPARE;
         }
 
+        // 採購工項的「公開給業主看」開關（items.procurement_public），獨立偵測
+        let HAS_PROCUREMENT_PUBLIC = false;
+
+        async function probeProcurementPublic() {
+            const { error } = await supabase.from('items').select('procurement_public').limit(0);
+            HAS_PROCUREMENT_PUBLIC = !error;
+            return HAS_PROCUREMENT_PUBLIC;
+        }
+
         // 自己的顯示名稱（profiles 的 SELECT 政策允許讀「本人」）
         async function fetchMyName() {
             try {
@@ -1631,7 +1644,8 @@
                        + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done, verified, verified_by' : '')
                        + (HAS_ATTENTION_PDF ? ', need_attention_pdf' : '')
                        + (HAS_PAYMENT_FIELDS ? ', payment_account, payment_amount, pdf_note' : '')
-                       + (HAS_COST_COMPARE ? ', cost_compare' : '') + ')')
+                       + (HAS_COST_COMPARE ? ', cost_compare' : '')
+                       + (HAS_PROCUREMENT_PUBLIC ? ', procurement_public' : '') + ')')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
@@ -1760,6 +1774,7 @@
                 payment_amount: e.items ? e.items.payment_amount : null,
                 pdf_note: e.items ? e.items.pdf_note : null,
                 cost_compare: e.items ? e.items.cost_compare : null,
+                procurement_public: e.items ? e.items.procurement_public : null,
             };
         }
 
@@ -2060,6 +2075,7 @@
                     <button type="button" class="ghost small" data-cost-edit="${esc(it.itemId)}">${cost ? '改費用' : '填費用'}</button></div>` : ''}
                 ${costEditHtml(it)}
                 ${costCompareBlock(it)}
+                ${procurementToggle(it)}
                 ${flagBlock(it)}
                 ${quoteBlock(it)}
                 ${todoBlock(it)}
@@ -2196,6 +2212,15 @@
                 <label class="quote-add">＋ 上傳費用比較檔案
                     <input type="file" multiple data-cc-file="${esc(it.itemId)}" style="display:none">
                 </label>
+            </div>`;
+        }
+
+        // 採購工項的「公開給業主看」開關（預設隱藏；打勾才在公開首頁出現）
+        function procurementToggle(it) {
+            if (it.status === '_loose' || !HAS_PROCUREMENT_PUBLIC) return '';
+            if (it.title !== '採購') return '';
+            return `<div class="procurement-toggle">
+                <label class="check-line"><input type="checkbox" data-proc-public="${esc(it.itemId)}"${it.procurement_public ? ' checked' : ''}>公開給業主看（採購預設隱藏）</label>
             </div>`;
         }
 
@@ -2396,6 +2421,19 @@
                 if (error) throw error;
             } catch (err) {
                 say('listMsg', '儲存失敗：' + err.message, 'error');
+            }
+        }
+
+        // 採購工項：切換「公開給業主看」
+        async function toggleProcurementPublic(itemId, checked) {
+            try {
+                const { error } = await supabase.from('items')
+                    .update({ procurement_public: !!checked }).eq('id', itemId).select('id');
+                if (error) throw error;
+                say('listMsg', checked ? '✅ 已公開給業主看' : '已隱藏（業主看不到）', 'ok');
+                await loadEntries();
+            } catch (err) {
+                say('listMsg', '公開開關更新失敗：' + err.message, 'error');
             }
         }
 
@@ -2779,6 +2817,10 @@
             // 需注意 / 完成付款 / 已核對：勾選即存
             box.querySelectorAll('[data-flag]').forEach(cb => {
                 cb.onchange = () => toggleFlag(cb.getAttribute('data-flag-item'), cb.getAttribute('data-flag'), cb.checked);
+            });
+            // 採購工項：公開給業主看
+            box.querySelectorAll('[data-proc-public]').forEach(cb => {
+                cb.onchange = () => toggleProcurementPublic(cb.getAttribute('data-proc-public'), cb.checked);
             });
             // 重新產生付款注意單 PDF
             box.querySelectorAll('[data-regen-pdf]').forEach(btn => {
