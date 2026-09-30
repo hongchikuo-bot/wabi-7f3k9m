@@ -579,6 +579,7 @@
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
     <script src="board.js"></script>
     <script type="module">
         import { supabase } from './supabase-client.js';
@@ -2367,6 +2368,13 @@
             return lines.join('\n').trim();
         }
 
+        // 圖片 → OCR 文字（tesseract.js，繁中 + 英文）
+        async function ocrImage(url) {
+            if (!window.Tesseract) throw new Error('OCR 元件還沒載入');
+            const { data } = await window.Tesseract.recognize(url, 'chi_tra+eng', { logger: () => {} });
+            return (data && data.text) ? data.text.trim() : '';
+        }
+
         // 勾「需注意」→ 產生付款摘要 PDF（施工事項＋付款資料＋核對人），上傳 storage 並存 items.need_attention_pdf
         async function generatePdf(itemId) {
             const it = findBoardItem(itemId);
@@ -2387,6 +2395,25 @@
             const unpaid = last ? ((Number(last.fin) || 0) - (Number(last.paid) || 0)) : null;
             const verifiedBy = (it.verified && it.verified_by) ? String(it.verified_by).trim() : '';
             const pdfNote = (it.pdf_note || '').trim();
+            // 先讀取「付款資料」檔案內容（電子檔讀文字、圖片 OCR），放到摘要第一頁
+            let payText = '';
+            const payDoc = quotes.find(q => q && q.name && String(q.name).includes('付款資料'));
+            if (payDoc) {
+                const pExt = extOf(payDoc.url);
+                try {
+                    if (isImgExt(pExt)) {
+                        say('listMsg', '正在辨識付款資料圖片…', 'ok');
+                        payText = await ocrImage(payDoc.url);
+                    } else if (pExt === 'pdf') {
+                        payText = await readPdfText(payDoc.url);
+                    } else if (pExt === 'docx' || pExt === 'doc') {
+                        payText = await readDocxText(payDoc.url);
+                    }
+                } catch (e) {
+                    say('listMsg', '付款資料內容讀取失敗（詳見後附檔案）：' + e.message, 'error');
+                    payText = '';
+                }
+            }
             const html = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:28px;color:#3d352d;font-size:14px;line-height:1.9;">
                 <h2 style="margin:0 0 16px;font-size:22px;text-align:center;">付款摘要</h2>
                 <div><b>工項：</b>${esc(it.title)}</div>
@@ -2396,7 +2423,8 @@
                 <div><b>施工事項：</b></div>
                 <div style="white-space:pre-wrap;">${desc ? esc(desc) : '（無描述）'}</div>
                 <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
-                <div><b>付款資料：</b>詳見後附「付款資料」檔案</div>
+                <div><b>付款資料：</b></div>
+                <div style="white-space:pre-wrap;">${payText ? esc(payText) : '（無法抓取，詳見後附檔案）'}</div>
                 ${quotes.length ? `<div>報價單：${quotes.map(q => esc(q.name)).join('、')}</div>` : ''}
                 ${pdfNote ? `<hr style="border:none;border-top:1px solid #ccc;margin:12px 0;"><div><b>備註：</b></div><div style="white-space:pre-wrap;">${esc(pdfNote)}</div>` : ''}
                 <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
