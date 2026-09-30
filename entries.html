@@ -661,7 +661,7 @@
             if (!HAS_RECORDER) missing.push('「紀錄人」（缺 project_logs.recorder_name 與公開頁的外掛視圖）');
             if (!HAS_TODOS) missing.push('「待辦清單」（缺 item_todos 表，要跑 sql/add-item-todos.sql）');
             if (!HAS_QUOTES) missing.push('「報價單」（缺 items.quotes 與公開頁視圖，要跑 sql/add-item-quotes.sql）');
-            if (!HAS_CURRENCY) missing.push('「費用幣別與需注意/完成付款」（缺 items.currency 等欄位，要跑 sql/add-item-cost-currency.sql）');
+            if (!HAS_CURRENCY) missing.push('「費用幣別與需注意/完成付款」（缺 items.estimate_currency 等欄位，要跑 sql/add-item-cost-currency.sql）');
             if (missing.length) {
                 say('formMsg', 'ℹ️ 還沒啟用的功能：' + missing.join('、')
                     + '。\n其他功能都正常；跑一次 private-docs/sql 裡的 SQL，重新整理後就會自動啟用。', 'info');
@@ -1175,7 +1175,7 @@
         let HAS_CURRENCY = false;
 
         async function probeCurrency() {
-            const { error } = await supabase.from('items').select('currency').limit(0);
+            const { error } = await supabase.from('items').select('estimate_currency').limit(0);
             HAS_CURRENCY = !error;
             return HAS_CURRENCY;
         }
