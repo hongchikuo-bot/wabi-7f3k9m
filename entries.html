@@ -365,15 +365,6 @@
         .file-row img { width: 64px; height: 48px; object-fit: cover; border-radius: 4px; flex: none; background: #eee; }
         .file-row input[type=text] { flex: 1; }
         .progress { font-size: 12px; color: var(--color-accent); margin-top: 6px; }
-        /* 工項浮層「新增紀錄」簡化表單 */
-        .sheet-entry { margin: 10px 0 14px; padding: 12px; border: 1px dashed #bf8b2e; border-radius: 10px; background: #faf6ee; }
-        .sheet-entry-head { font-weight: 700; color: #5a4d3f; margin-bottom: 8px; font-size: 14px; }
-        .sheet-entry-label { display: block; margin: 6px 0; font-size: 12px; color: #6b6459; }
-        .sheet-entry-label input[type=date], .sheet-entry-label input[type=text], .sheet-entry-label textarea { width: 100%; box-sizing: border-box; margin-top: 3px; padding: 6px 8px; border: 1px solid #d8cfc0; border-radius: 6px; font-size: 13px; font-family: inherit; }
-        .sheet-entry-photos { margin: 6px 0; }
-        .sheet-photo-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #5a4d3f; padding: 2px 0; }
-        .sheet-photo-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .sheet-entry-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -979,7 +970,6 @@
         // ---------- 照片：檔案（拍照 / 選檔 / 拖放）----------
         const PHOTO_BUCKET = 'log-photos';
         let pendingFiles = [];   // [{ file, desc }]
-        let SHEET_FILES = [];    // 工項浮層「新增紀錄」的暫存照片 [{ file, desc }]
 
         function renderFilePreviews() {
             const box = $('photoPreview');
@@ -1996,103 +1986,6 @@
             return null;
         }
 
-        // ---------- 工項浮層的「新增紀錄」簡化表單（點入浮層直接記錄）----------
-        const todayStr = () => {
-            const d = new Date();
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        };
-
-        function sheetEntryHtml(it) {
-            if (it.status === '_loose') return '';
-            return `<div class="sheet-entry">
-                <div class="sheet-entry-head">＋ 新增一筆紀錄</div>
-                <label class="sheet-entry-label">日期<input type="date" id="sheet-entry-date" value="${todayStr()}"></label>
-                <label class="sheet-entry-label">描述<textarea id="sheet-entry-desc" rows="2" placeholder="施工進度、做了什麼…"></textarea></label>
-                <label class="sheet-entry-label">發現問題<input type="text" id="sheet-entry-issues" placeholder="（選填）"></label>
-                <label class="sheet-entry-label">備註<textarea id="sheet-entry-notes" rows="2" placeholder="（選填）"></textarea></label>
-                <div class="sheet-entry-photos" id="sheet-entry-photos"></div>
-                <div class="sheet-entry-actions">
-                    <button type="button" class="ghost small" data-sheet-camera>📷 拍照</button>
-                    <button type="button" class="ghost small" data-sheet-pick>🖼 選照片</button>
-                    <button type="button" class="primary small" data-sheet-submit="${esc(it.itemId)}">送出紀錄</button>
-                </div>
-                <input type="file" id="sheet-entry-cam" accept="image/*" capture="environment" multiple style="display:none">
-                <input type="file" id="sheet-entry-pick" accept="image/*" multiple style="display:none">
-            </div>`;
-        }
-
-        function renderSheetPhotos() {
-            const box = $('sheet-entry-photos');
-            if (!box) return;
-            box.innerHTML = SHEET_FILES.map((p, i) =>
-                `<div class="sheet-photo-row"><span>${esc(p.file.name)}</span><button type="button" class="ghost small" data-sheet-photo-del="${i}">✕</button></div>`).join('');
-        }
-
-        function addSheetFiles(fileList) {
-            let added = 0;
-            for (const f of fileList) {
-                if (!String(f.type || '').startsWith('image/')) continue;
-                SHEET_FILES.push({ file: f, desc: '' });
-                added++;
-            }
-            renderSheetPhotos();
-            if (!added && fileList.length) say('listMsg', '只能上傳圖片檔', 'error');
-        }
-
-        async function submitSheetEntry(itemId) {
-            const it = findBoardItem(itemId);
-            if (!it) return;
-            const last = it.logs && it.logs[it.logs.length - 1];
-            const src = last && last.src;
-            if (!src) return say('listMsg', '找不到工項資料');
-            const projectId = src.project_id;
-            const nodeId = src.node_id;
-            const workType = it.title;
-            const logDate = ($('sheet-entry-date') && $('sheet-entry-date').value) || '';
-            const desc = ($('sheet-entry-desc') && $('sheet-entry-desc').value.trim()) || '';
-            const issues = ($('sheet-entry-issues') && $('sheet-entry-issues').value.trim()) || null;
-            const notes = ($('sheet-entry-notes') && $('sheet-entry-notes').value.trim()) || null;
-            if (!logDate) return say('listMsg', '請選擇日期');
-            if (!desc && !SHEET_FILES.length) return say('listMsg', '至少填描述或上傳照片');
-            let itemRow;
-            try {
-                itemRow = await ensureItemFor(projectId, nodeId, workType);
-            } catch (err) {
-                return say('listMsg', err.message);
-            }
-            const itemStatus = (itemRow.status !== null && itemRow.status !== undefined) ? itemRow.status : '';
-            let filePhotos = [];
-            if (SHEET_FILES.length) {
-                try {
-                    filePhotos = await uploadFileList(SHEET_FILES, projectId, null);
-                } catch (err) {
-                    return say('listMsg', '照片上傳失敗：' + err.message);
-                }
-            }
-            const photos = filePhotos.map(p => ({ ...p, taken_at: logDate }));
-            const payload = {
-                project_id: projectId, log_date: logDate, node_id: nodeId, item_id: itemRow.id,
-                location: NODE_PATHS.get(nodeId) || null,
-                main_description: desc || null, progress_status: itemStatus,
-                issues_found: issues, notes: notes
-            };
-            if (HAS_RECORDER) payload.recorder_name = MY_NAME || null;
-            const { data: log, error } = await supabase.from('project_logs').insert([payload]).select().single();
-            if (error) return say('listMsg', '寫入失敗：' + error.message);
-            if (photos.length) {
-                const { error: pErr } = await supabase.from('log_photos')
-                    .insert(stripRec(stripTa(photos.map((p, i) => ({ ...p, log_id: log.id, sort_order: i, recorder_name: MY_NAME || null })))));
-                if (pErr) return say('listMsg', '紀錄已建立，但照片寫入失敗：' + pErr.message);
-            }
-            say('listMsg', '✅ 已新增一筆紀錄', 'ok');
-            SHEET_FILES = [];
-            if ($('sheet-entry-desc')) $('sheet-entry-desc').value = '';
-            if ($('sheet-entry-issues')) $('sheet-entry-issues').value = '';
-            if ($('sheet-entry-notes')) $('sheet-entry-notes').value = '';
-            renderSheetPhotos();
-            await loadEntries();
-        }
-
         function sheetHtml(it) {
             const meta = [
                 it.opening ? fmtMonthDay(it.opening) + ' 開案' : '',
@@ -2112,7 +2005,6 @@
                     <button type="button" class="sheet-close" title="關閉">&times;</button>
                 </div>
                 <div class="sheet-meta">${esc(meta)}</div>
-                ${sheetEntryHtml(it)}
                 ${it.maintenance ? `
                 <div class="maint-sheet-row">
                     <label>🔧 下次維修時間</label>
@@ -2537,23 +2429,6 @@
             box.querySelectorAll('[data-regen-pdf]').forEach(btn => {
                 btn.onclick = () => generatePdf(btn.getAttribute('data-regen-pdf'));
             });
-            // 浮層「新增紀錄」：拍照 / 選照片 / 送出 / 刪暫存照片
-            box.querySelectorAll('[data-sheet-camera]').forEach(btn => {
-                btn.onclick = () => { const f = $('sheet-entry-cam'); if (f) f.click(); };
-            });
-            box.querySelectorAll('[data-sheet-pick]').forEach(btn => {
-                btn.onclick = () => { const f = $('sheet-entry-pick'); if (f) f.click(); };
-            });
-            box.querySelectorAll('[data-sheet-submit]').forEach(btn => {
-                btn.onclick = () => submitSheetEntry(btn.getAttribute('data-sheet-submit'));
-            });
-            box.querySelectorAll('[data-sheet-photo-del]').forEach(btn => {
-                btn.onclick = () => { SHEET_FILES.splice(Number(btn.getAttribute('data-sheet-photo-del')), 1); renderSheetPhotos(); };
-            });
-            const camInp = $('sheet-entry-cam');
-            const pickInp = $('sheet-entry-pick');
-            if (camInp) camInp.onchange = () => { addSheetFiles(camInp.files); camInp.value = ''; };
-            if (pickInp) pickInp.onchange = () => { addSheetFiles(pickInp.files); pickInp.value = ''; };
             // 核對人名字：填完即存
             box.querySelectorAll('[data-verify-name]').forEach(inp => {
                 inp.onchange = () => saveVerifyName(inp.getAttribute('data-verify-name'), inp.value);
