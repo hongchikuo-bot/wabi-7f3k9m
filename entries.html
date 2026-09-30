@@ -2561,6 +2561,14 @@
         }
 
         function closeItemSheet() {
+            // 關閉前把備註欄未保存的內容存起來（避免編輯到一半就丟失）
+            if (OPEN_ITEM) {
+                const note = document.querySelector('[data-pdf-note="' + OPEN_ITEM + '"]');
+                if (note && note.value.trim()) {
+                    supabase.from('items').update({ pdf_note: note.value.trim() }).eq('id', OPEN_ITEM)
+                        .then(() => {}, () => {});
+                }
+            }
             OPEN_ITEM = null;
             const sheet = $('sheet');
             if (sheet) sheet.classList.remove('open');
@@ -2665,9 +2673,13 @@
             box.querySelectorAll('[data-regen-pdf]').forEach(btn => {
                 btn.onclick = () => generatePdf(btn.getAttribute('data-regen-pdf'));
             });
-            // 備註：填完即存
+            // 備註：打字時自動存（防抖 500ms），避免編輯中離開浮層就丟失
             box.querySelectorAll('[data-pdf-note]').forEach(inp => {
-                inp.onchange = () => savePayField(inp.getAttribute('data-pdf-note'), 'pdf_note', inp.value);
+                let t;
+                inp.oninput = () => {
+                    clearTimeout(t);
+                    t = setTimeout(() => savePayField(inp.getAttribute('data-pdf-note'), 'pdf_note', inp.value), 500);
+                };
             });
             // 掃描付款資料 → 填備註欄
             box.querySelectorAll('[data-scan-pay]').forEach(btn => {
@@ -3332,8 +3344,7 @@
         $('saveNameBtn').onclick = saveDisplayName;
         $('reorderBtn').onclick = reorderAllPhotos;
         $('formHead').onclick = () => setFormOpen();   // 點標題 → 展開／收起
-        // 浮層：點背景或按 Esc 關閉
-        $('sheet').onclick = e => { if (e.target && e.target.id === 'sheet') closeItemSheet(); };
+        // 浮層：按 Esc 關閉（點背景不關閉，避免誤觸丟失編輯）
         document.addEventListener('keydown', e => { if (e.key === 'Escape') closeItemSheet(); });
         $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); showLogin(); };
 
