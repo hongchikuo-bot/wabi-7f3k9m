@@ -2431,15 +2431,24 @@
                     try {
                         if (isImgExt(ext)) {
                             const imgUrl = await imageToDataUrl(payDoc.url);
-                            const dim = await new Promise((res, rej) => {
-                                const im = new Image();
-                                im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight });
-                                im.onerror = () => rej(new Error('付款資料圖片載入失敗'));
-                                im.src = imgUrl;
+                            const img = new Image();
+                            await new Promise((res, rej) => {
+                                img.onload = res;
+                                img.onerror = () => rej(new Error('付款資料圖片載入失敗'));
+                                img.src = imgUrl;
                             });
-                            const sc = Math.min(pageW / dim.w, pageH / dim.h);
+                            // 統一轉成 JPEG（白底），避免 PNG 透明變黑、也避免 addImage 格式不符
+                            const c = document.createElement('canvas');
+                            c.width = img.naturalWidth;
+                            c.height = img.naturalHeight;
+                            const cctx = c.getContext('2d');
+                            cctx.fillStyle = '#ffffff';
+                            cctx.fillRect(0, 0, c.width, c.height);
+                            cctx.drawImage(img, 0, 0);
+                            const jpegData = c.toDataURL('image/jpeg', 0.9);
+                            const sc = Math.min(pageW / img.naturalWidth, pageH / img.naturalHeight);
                             pdf.addPage();
-                            pdf.addImage(imgUrl, 'JPEG', margin, margin, dim.w * sc, dim.h * sc);
+                            pdf.addImage(jpegData, 'JPEG', margin, margin, img.naturalWidth * sc, img.naturalHeight * sc);
                         } else if (ext === 'pdf' || ext === 'docx' || ext === 'doc') {
                             const txt = ext === 'pdf' ? await readPdfText(payDoc.url) : await readDocxText(payDoc.url);
                             if (txt) {
