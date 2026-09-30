@@ -2246,7 +2246,8 @@
                 <label class="check-line"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需注意（整張卡變色凸顯）</label>
                 ${HAS_PAYMENT_FIELDS ? `
                 <div class="pay-fields">
-                    <label>備註<input type="text" data-pdf-note="${esc(it.itemId)}" value="${esc(it.pdf_note || '')}" placeholder="資訊不夠完整時補充"></label>
+                    <label>付款資料（備註）<textarea data-pdf-note="${esc(it.itemId)}" rows="6" placeholder="點下方「掃描付款資料」自動帶入，可在此核對修改">${esc(it.pdf_note || '')}</textarea></label>
+                    <button type="button" class="ghost small" data-scan-pay="${esc(it.itemId)}">🔍 掃描付款資料</button>
                 </div>` : ''}
                 ${it.need_attention_pdf ? `<div class="pdf-link"><a href="${esc(it.need_attention_pdf)}" target="_blank" rel="noopener">📄 付款摘要 PDF</a> <button type="button" class="danger small" data-del-pdf="${esc(it.itemId)}">刪除</button></div>` : ''}
                 <button type="button" class="ghost small" data-regen-pdf="${esc(it.itemId)}">產生付款摘要 PDF</button>
@@ -2290,6 +2291,39 @@
                 if (error) throw error;
             } catch (err) {
                 say('listMsg', '儲存失敗：' + err.message, 'error');
+            }
+        }
+
+        // 掃描「付款資料」檔案（電子檔讀文字、圖片 OCR）→ 填入備註欄 → 存 items.pdf_note
+        async function scanPayToNote(itemId) {
+            const it = findBoardItem(itemId);
+            if (!it) return;
+            const payDoc = (it.quotes || []).find(q => q && q.name && String(q.name).includes('付款資料'));
+            if (!payDoc) return say('listMsg', '找不到名為「付款資料」的檔案（請先上傳並改名）', 'error');
+            const ext = extOf(payDoc.url);
+            say('listMsg', '正在掃描付款資料…', 'ok');
+            let text = '';
+            try {
+                if (isImgExt(ext)) {
+                    text = await ocrImage(payDoc.url);
+                } else if (ext === 'pdf') {
+                    text = await readPdfText(payDoc.url);
+                } else if (ext === 'docx' || ext === 'doc') {
+                    text = await readDocxText(payDoc.url);
+                } else {
+                    return say('listMsg', '掃描失敗：不支援的格式 .' + ext, 'error');
+                }
+            } catch (e) {
+                return say('listMsg', '掃描失敗：' + e.message, 'error');
+            }
+            if (!text) return say('listMsg', '掃描結果是空的', 'error');
+            const note = document.querySelector('[data-pdf-note="' + itemId + '"]');
+            if (note) note.value = text;
+            try {
+                await supabase.from('items').update({ pdf_note: text }).eq('id', itemId).select('id');
+                say('listMsg', '✅ 已掃描付款資料到備註欄，請核對修改', 'ok');
+            } catch (e) {
+                say('listMsg', '掃描完成但儲存失敗：' + e.message, 'error');
             }
         }
 
@@ -2407,26 +2441,8 @@
             const unpaid = last ? ((Number(last.fin) || 0) - (Number(last.paid) || 0)) : null;
             const verifiedBy = (it.verified && it.verified_by) ? String(it.verified_by).trim() : '';
             const pdfNote = (it.pdf_note || '').trim();
-            // 先讀取「付款資料」檔案內容（電子檔讀文字、圖片 OCR），放到摘要第一頁
-            let payText = '';
-            const payDoc = quotes.find(q => q && q.name && String(q.name).includes('付款資料'));
-            if (payDoc) {
-                const pExt = extOf(payDoc.url);
-                try {
-                    if (isImgExt(pExt)) {
-                        say('listMsg', '正在辨識付款資料圖片…', 'ok');
-                        payText = await ocrImage(payDoc.url);
-                    } else if (pExt === 'pdf') {
-                        payText = await readPdfText(payDoc.url);
-                    } else if (pExt === 'docx' || pExt === 'doc') {
-                        payText = await readDocxText(payDoc.url);
-                    }
-                } catch (e) {
-                    say('listMsg', '付款資料內容讀取失敗（詳見後附檔案）：' + e.message, 'error');
-                    payText = '';
-                }
-            }
-            payText = filterPayText(payText);
+            // 付款資料內容＝備註欄（用戶掃描付款資料後核對編輯過的），直接併入摘要
+            const payText = pdfNote;
             const html = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:28px;color:#3d352d;font-size:14px;line-height:1.9;">
                 <h2 style="margin:0 0 16px;font-size:22px;text-align:center;">付款摘要</h2>
                 <div><b>工項：</b>${esc(it.title)}</div>
@@ -2437,9 +2453,8 @@
                 <div style="white-space:pre-wrap;">${desc ? esc(desc) : '（無描述）'}</div>
                 <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
                 <div><b>付款資料：</b></div>
-                <div style="white-space:pre-wrap;">${payText ? esc(payText) : '（無法抓取，詳見後附檔案）'}</div>
+                <div style="white-space:pre-wrap;">${payText ? esc(payText) : '（尚未填寫，可點「掃描付款資料」帶入）'}</div>
                 ${quotes.length ? `<div>報價單：${quotes.map(q => esc(q.name)).join('、')}</div>` : ''}
-                ${pdfNote ? `<hr style="border:none;border-top:1px solid #ccc;margin:12px 0;"><div><b>備註：</b></div><div style="white-space:pre-wrap;">${esc(pdfNote)}</div>` : ''}
                 <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
                 <div><b>核對人員：</b>${verifiedBy ? esc(verifiedBy) : '（尚未核對）'}</div>
             </div>`;
@@ -2465,54 +2480,30 @@
                     const s = pageH / imgH;
                     pdf.addImage(imgData, 'JPEG', margin, margin, imgW * s, pageH);
                 }
-                // 找「付款資料」檔案 → 電子檔讀文字、圖片附原圖，都附進 PDF 最後
+                // 付款資料若是圖片 → 附原圖到 PDF 最後（電子檔內容已透過「掃描」進備註欄，不重複附）
                 const payDoc = quotes.find(q => q && q.name && String(q.name).includes('付款資料'));
-                if (payDoc) {
-                    const ext = extOf(payDoc.url);
+                if (payDoc && isImgExt(extOf(payDoc.url))) {
                     try {
-                        if (isImgExt(ext)) {
-                            const imgUrl = await imageToDataUrl(payDoc.url);
-                            const img = new Image();
-                            await new Promise((res, rej) => {
-                                img.onload = res;
-                                img.onerror = () => rej(new Error('付款資料圖片載入失敗'));
-                                img.src = imgUrl;
-                            });
-                            // 統一轉成 JPEG（白底），避免 PNG 透明變黑、也避免 addImage 格式不符
-                            const c = document.createElement('canvas');
-                            c.width = img.naturalWidth;
-                            c.height = img.naturalHeight;
-                            const cctx = c.getContext('2d');
-                            cctx.fillStyle = '#ffffff';
-                            cctx.fillRect(0, 0, c.width, c.height);
-                            cctx.drawImage(img, 0, 0);
-                            const jpegData = c.toDataURL('image/jpeg', 0.9);
-                            const sc = Math.min(pageW / img.naturalWidth, pageH / img.naturalHeight);
-                            pdf.addPage();
-                            pdf.addImage(jpegData, 'JPEG', margin, margin, img.naturalWidth * sc, img.naturalHeight * sc);
-                        } else if (ext === 'pdf' || ext === 'docx' || ext === 'doc') {
-                            const txt = ext === 'pdf' ? await readPdfText(payDoc.url) : await readDocxText(payDoc.url);
-                            if (txt) {
-                                const noteHolder = document.createElement('div');
-                                noteHolder.style.cssText = 'position:fixed;left:-10000px;top:0;width:600px;background:#fff;';
-                                noteHolder.innerHTML = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:28px;color:#3d352d;font-size:13px;line-height:1.7;"><h3 style="margin:0 0 10px;">付款資料內容</h3><div style="white-space:pre-wrap;">${esc(txt)}</div></div>`;
-                                document.body.appendChild(noteHolder);
-                                try {
-                                    const nc = await window.html2canvas(noteHolder, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
-                                    const nData = nc.toDataURL('image/jpeg', 0.9);
-                                    pdf.addPage();
-                                    const nW = pageW;
-                                    const nH = Math.min(nc.height * nW / nc.width, pageH);
-                                    pdf.addImage(nData, 'JPEG', margin, margin, nW, nH);
-                                } finally {
-                                    noteHolder.remove();
-                                }
-                            }
-                        } else {
-                            say('listMsg', '付款資料格式 .' + ext + ' 無法讀取，已略過', 'error');
-                        }
+                        const imgUrl = await imageToDataUrl(payDoc.url);
+                        const img = new Image();
+                        await new Promise((res, rej) => {
+                            img.onload = res;
+                            img.onerror = () => rej(new Error('付款資料圖片載入失敗'));
+                            img.src = imgUrl;
+                        });
+                        const c = document.createElement('canvas');
+                        c.width = img.naturalWidth;
+                        c.height = img.naturalHeight;
+                        const cctx = c.getContext('2d');
+                        cctx.fillStyle = '#ffffff';
+                        cctx.fillRect(0, 0, c.width, c.height);
+                        cctx.drawImage(img, 0, 0);
+                        const jpegData = c.toDataURL('image/jpeg', 0.9);
+                        const sc = Math.min(pageW / img.naturalWidth, pageH / img.naturalHeight);
+                        pdf.addPage();
+                        pdf.addImage(jpegData, 'JPEG', margin, margin, img.naturalWidth * sc, img.naturalHeight * sc);
                     } catch (e) {
-                        say('listMsg', '付款資料內容讀取失敗（已略過）：' + e.message, 'error');
+                        say('listMsg', '付款資料原圖附上失敗（已略過）：' + e.message, 'error');
                     }
                 }
                 const blob = pdf.output('blob');
@@ -2673,6 +2664,10 @@
             // 備註：填完即存
             box.querySelectorAll('[data-pdf-note]').forEach(inp => {
                 inp.onchange = () => savePayField(inp.getAttribute('data-pdf-note'), 'pdf_note', inp.value);
+            });
+            // 掃描付款資料 → 填備註欄
+            box.querySelectorAll('[data-scan-pay]').forEach(btn => {
+                btn.onclick = () => scanPayToNote(btn.getAttribute('data-scan-pay'));
             });
             // 刪除已產生的付款摘要 PDF
             box.querySelectorAll('[data-del-pdf]').forEach(btn => {
