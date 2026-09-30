@@ -2271,12 +2271,10 @@
             document.body.appendChild(holder);
             try {
                 if (!window.html2pdf) throw new Error('PDF 元件還沒載入（重新整理再試）');
-                const worker = window.html2pdf().set({
+                const blob = await window.html2pdf().set({
                     margin: 8, image: { type: 'jpeg', quality: 0.95 },
                     html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-                }).from(holder).toPdf();
-                const pdf = await worker.get('pdf');
-                const blob = pdf.output('blob');
+                }).from(holder).outputPdf('blob');
                 if (!blob) throw new Error('PDF 生成失敗');
                 const path = `quotes/${itemId}/付款注意單-${Date.now()}.pdf`;
                 const file = new File([blob], '付款注意單.pdf', { type: 'application/pdf' });
