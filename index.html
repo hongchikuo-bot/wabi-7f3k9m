@@ -613,7 +613,7 @@
             return `<div class="pub-pay">
                 <div class="pub-pay-head">💳 付款</div>
                 ${pdf ? `<a class="pub-pay-pdf" href="${esc(pdf)}" target="_blank" rel="noopener">📄 下載付款摘要</a>` : ''}
-                <label class="pub-pay-line"><input type="checkbox" ${it.payment_done ? ' checked' : ''} onclick="markPaid('${esc(it.itemId)}', this.checked)">已付款</label>
+                <label class="pub-pay-line"><input type="checkbox" ${it.payment_done ? ' checked' : ''} onclick="markPaid('${esc(it.itemId)}', this.checked)">付款後請打勾</label>
                 ${receipt ? `<a class="pub-pay-receipt" href="${esc(receipt)}" target="_blank" rel="noopener">🧾 查看付款水單</a>` : ''}
                 <label class="pub-pay-upload">＋ 上傳付款水單
                     <input type="file" accept="image/*,.pdf" onchange="uploadReceipt('${esc(it.itemId)}', this.files[0])" style="display:none">
