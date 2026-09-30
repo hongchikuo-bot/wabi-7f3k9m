@@ -221,7 +221,7 @@
             .it-meta { display: none; }
             .it-meta-short { display: block; flex-basis: 100%; font-size: 0.62rem; color: var(--color-muted); }
         }
-        /* 手機點工項 → 全寬浮層（90px 的欄位裡沒法看照片） */
+        /* 點工項 → 整頁浮層（業主看資料較清楚） */
         #sheet {
             display: none; position: fixed; inset: 0; z-index: 900;
             background: rgba(61, 53, 45, 0.45);
@@ -231,7 +231,7 @@
         #sheet.open { display: block; }
         .sheet-box {
             background: var(--color-bg); border-radius: 8px;
-            max-width: 640px; margin: 0 auto; padding: 1.1rem 1.1rem 1.4rem;
+            max-width: 900px; margin: 0 auto; padding: 1.4rem 1.4rem 1.8rem;
         }
         .sheet-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.9rem; }
         .sheet-title { font-size: 1.05rem; font-weight: 500; }
@@ -301,7 +301,7 @@
         .rec-issues { font-size: 0.8rem; color: #a06a00; margin-top: 0.2rem; }
         .rec-notes { font-size: 0.8rem; color: var(--color-muted); margin-top: 0.2rem; white-space: pre-wrap; }
         /* 公開頁需注意 → 卡片變色 */
-        .item-row.need-attention { background: #f6e6c4; border-left: 3px solid #d9a441; padding-left: 0.5rem; }
+        .item-row.need-attention { background: #f6e6c4; border-left: 3px solid #d9a441; padding-left: 0.5rem; margin: 0.5rem 0; border-radius: 6px; }
         /* 付款區塊（PDF + 已付款 + 水單上傳） */
         .pub-pay { margin: 0.4rem 0 0.8rem; padding: 0.6rem 0.8rem; border: 1px dashed var(--color-line); border-radius: 6px; background: #fffdf9; }
         .pub-pay-head { font-size: 0.82rem; color: var(--color-accent); font-weight: 600; margin-bottom: 0.4rem; }
@@ -612,7 +612,7 @@
             const receipt = it.payment_receipt;
             return `<div class="pub-pay">
                 <div class="pub-pay-head">💳 付款</div>
-                ${pdf ? `<a class="pub-pay-pdf" href="${esc(pdf)}" target="_blank" rel="noopener">📄 下載付款注意單</a>` : ''}
+                ${pdf ? `<a class="pub-pay-pdf" href="${esc(pdf)}" target="_blank" rel="noopener">📄 下載付款摘要</a>` : ''}
                 <label class="pub-pay-line"><input type="checkbox" ${it.payment_done ? ' checked' : ''} onclick="markPaid('${esc(it.itemId)}', this.checked)">已付款</label>
                 ${receipt ? `<a class="pub-pay-receipt" href="${esc(receipt)}" target="_blank" rel="noopener">🧾 查看付款水單</a>` : ''}
                 <label class="pub-pay-upload">＋ 上傳付款水單
@@ -720,8 +720,8 @@
 
         function toggleItem(row) {
             if (!row) return;
-            if (window.innerWidth <= SHEET_MAX) return openItemSheet(row.getAttribute('data-item'));
-            row.classList.toggle('open');
+            // 點工項 → 一律開整頁浮層（業主看資料較清楚，不再分桌機/手機就地展開）
+            openItemSheet(row.getAttribute('data-item'));
         }
 
         function findItem(itemId) {
@@ -738,7 +738,7 @@
                 + `${esc(STATUS_LABEL[it.status] || '開案')}</span>`;
         }
 
-        // 手機點工項 → 全寬浮層（照片才看得清楚）
+        // 點工項 → 整頁浮層（業主看資料較清楚）
         function openItemSheet(itemId) {
             const found = findItem(itemId);
             const box = document.getElementById('sheetBox');
