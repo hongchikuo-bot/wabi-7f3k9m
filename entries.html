@@ -2375,6 +2375,18 @@
             return (data && data.text) ? data.text.trim() : '';
         }
 
+        // 過濾付款資料文字：拿掉手續費、訂單編號、地址、SWIFT、銀行代碼等雜項，只留關鍵付款資訊
+        function filterPayText(text) {
+            if (!text) return '';
+            const DROP = ['手續費', 'estimated', 'fee', '訂單', 'order', '地址', 'tower', 'road', 'street', 'garden', 'central', 'swift', '銀行代碼', '分行代碼', '國家', '地區', 'country', 'payment', 'wire', 'transfer', 'fintr'];
+            const lines = String(text).split('\n').map(l => l.trim()).filter(Boolean);
+            const kept = lines.filter(line => {
+                const low = line.toLowerCase();
+                return !DROP.some(k => low.includes(k));
+            });
+            return kept.join('\n');
+        }
+
         // 勾「需注意」→ 產生付款摘要 PDF（施工事項＋付款資料＋核對人），上傳 storage 並存 items.need_attention_pdf
         async function generatePdf(itemId) {
             const it = findBoardItem(itemId);
@@ -2414,6 +2426,7 @@
                     payText = '';
                 }
             }
+            payText = filterPayText(payText);
             const html = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:28px;color:#3d352d;font-size:14px;line-height:1.9;">
                 <h2 style="margin:0 0 16px;font-size:22px;text-align:center;">付款摘要</h2>
                 <div><b>工項：</b>${esc(it.title)}</div>
