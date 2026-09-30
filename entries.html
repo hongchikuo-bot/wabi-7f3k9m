@@ -214,6 +214,7 @@
         .quote-name { flex: 1; color: var(--color-accent); text-decoration: underline; overflow-wrap: anywhere; min-width: 0; }
         .quote-add { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--color-accent); cursor: pointer; }
         .quote-add:hover { opacity: 0.85; }
+        .quote-hint { font-size: 0.72rem; color: var(--color-muted); margin-top: 0.3rem; }
         .quote-thumb { display: block; max-width: 130px; max-height: 90px; border-radius: 4px; object-fit: cover; flex: none; }
         .quote-thumb-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; font-size: 1.7rem; color: var(--color-muted); border: 1px solid var(--color-line); border-radius: 4px; }
         .quote-row { align-items: flex-start; }
@@ -2147,6 +2148,7 @@
                 <label class="quote-add">＋ 上傳報價單（任何檔案）
                     <input type="file" multiple data-quote-file="${esc(it.itemId)}" style="display:none">
                 </label>
+                <div class="quote-hint">💡 檔名改成「付款資料」的檔案，會在產生付款摘要時自動抓取內容。</div>
             </div>`;
         }
 
@@ -2210,14 +2212,14 @@
             }
         }
 
-        // 重新命名報價單（把「匯款資料」改成「付款單」→ 付款摘要會自動抓取）
+        // 重新命名報價單（把「匯款資料」改成「付款資料」→ 付款摘要會自動抓取）
         async function renameQuote(itemId, idx) {
             const it = findBoardItem(itemId);
             if (!it) return;
             const qs = (it.quotes || []).slice();
             if (!qs[idx]) return;
             const cur = qs[idx].name || ('報價單 ' + (idx + 1));
-            const name = prompt('變更這個檔案的名稱\n\n改成「付款單」就能被付款摘要自動抓取。', cur);
+            const name = prompt('變更這個檔案的名稱\n\n改成「付款資料」就能被付款摘要自動抓取。', cur);
             if (name === null) return;
             const trimmed = String(name).trim();
             if (!trimmed) return say('listMsg', '名稱不能是空的', 'error');
@@ -2316,7 +2318,7 @@
             }
         }
 
-        // ---------- 讀取「付款單」檔案內容（電子檔讀文字、圖片附原圖）----------
+        // ---------- 讀取「付款資料」檔案內容（電子檔讀文字、圖片附原圖）----------
         const extOf = url => {
             const m = String(url || '').toLowerCase().match(/\.([a-z0-9]+)(?:\?|$)/);
             return m ? m[1] : '';
@@ -2326,7 +2328,7 @@
         // 圖片 → data URL（要 CORS；storage 公開圖有跨域許可）
         async function imageToDataUrl(url) {
             const resp = await fetch(url);
-            if (!resp.ok) throw new Error('讀取付款單圖片失敗');
+            if (!resp.ok) throw new Error('讀取付款資料圖片失敗');
             const blob = await resp.blob();
             return await new Promise((res, rej) => {
                 const r = new FileReader();
@@ -2354,7 +2356,7 @@
         async function readDocxText(url) {
             if (!window.JSZip) throw new Error('Word 讀取元件還沒載入');
             const resp = await fetch(url);
-            if (!resp.ok) throw new Error('讀取付款單檔案失敗');
+            if (!resp.ok) throw new Error('讀取付款資料檔案失敗');
             const buf = await resp.arrayBuffer();
             const zip = await JSZip.loadAsync(buf);
             const xml = await zip.file('word/document.xml').async('string');
@@ -2428,8 +2430,8 @@
                     const s = pageH / imgH;
                     pdf.addImage(imgData, 'JPEG', margin, margin, imgW * s, pageH);
                 }
-                // 找「付款單」檔案 → 電子檔讀文字、圖片附原圖，都附進 PDF 最後
-                const payDoc = quotes.find(q => q && q.name && String(q.name).includes('付款單'));
+                // 找「付款資料」檔案 → 電子檔讀文字、圖片附原圖，都附進 PDF 最後
+                const payDoc = quotes.find(q => q && q.name && String(q.name).includes('付款資料'));
                 if (payDoc) {
                     const ext = extOf(payDoc.url);
                     try {
@@ -2438,7 +2440,7 @@
                             const dim = await new Promise((res, rej) => {
                                 const im = new Image();
                                 im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight });
-                                im.onerror = () => rej(new Error('付款單圖片載入失敗'));
+                                im.onerror = () => rej(new Error('付款資料圖片載入失敗'));
                                 im.src = imgUrl;
                             });
                             const sc = Math.min(pageW / dim.w, pageH / dim.h);
@@ -2449,7 +2451,7 @@
                             if (txt) {
                                 const noteHolder = document.createElement('div');
                                 noteHolder.style.cssText = 'position:fixed;left:-10000px;top:0;width:600px;background:#fff;';
-                                noteHolder.innerHTML = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:28px;color:#3d352d;font-size:13px;line-height:1.7;"><h3 style="margin:0 0 10px;">付款單內容</h3><div style="white-space:pre-wrap;">${esc(txt)}</div></div>`;
+                                noteHolder.innerHTML = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:28px;color:#3d352d;font-size:13px;line-height:1.7;"><h3 style="margin:0 0 10px;">付款資料內容</h3><div style="white-space:pre-wrap;">${esc(txt)}</div></div>`;
                                 document.body.appendChild(noteHolder);
                                 try {
                                     const nc = await window.html2canvas(noteHolder, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
@@ -2463,10 +2465,10 @@
                                 }
                             }
                         } else {
-                            say('listMsg', '付款單格式 .' + ext + ' 無法讀取，已略過', 'error');
+                            say('listMsg', '付款資料格式 .' + ext + ' 無法讀取，已略過', 'error');
                         }
                     } catch (e) {
-                        say('listMsg', '付款單內容讀取失敗（已略過）：' + e.message, 'error');
+                        say('listMsg', '付款資料內容讀取失敗（已略過）：' + e.message, 'error');
                     }
                 }
                 const blob = pdf.output('blob');
