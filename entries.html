@@ -2200,6 +2200,7 @@
                 </label>
                 <label class="check-line"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需注意（整張卡變色凸顯）</label>
                 ${it.need_attention_pdf ? `<div class="pdf-link"><a href="${esc(it.need_attention_pdf)}" target="_blank" rel="noopener">📄 付款注意單 PDF</a></div>` : ''}
+                ${it.need_attention ? `<button type="button" class="ghost small" data-regen-pdf="${esc(it.itemId)}">重新產生 PDF</button>` : ''}
                 <label class="check-line"><input type="checkbox" data-flag="payment_done" data-flag-item="${esc(it.itemId)}"${it.payment_done ? ' checked' : ''}>完成付款（恢復卡片顏色）</label>
             </div>`;
         }
@@ -2214,6 +2215,7 @@
                     await generatePdf(itemId);
                 } else {
                     await loadEntries();
+                    say('listMsg', '已更新', 'ok');
                 }
             } catch (err) {
                 say('listMsg', '標記更新失敗：' + err.message, 'error');
@@ -2234,7 +2236,7 @@
         // 勾「需注意」→ 產生付款注意單 PDF（施工事項＋價位＋報價單），上傳 storage 並存 items.need_attention_pdf
         async function generatePdf(itemId) {
             const it = findBoardItem(itemId);
-            if (!it) return;
+            if (!it) { say('listMsg', '找不到工項，PDF 無法產生', 'error'); return; }
             const last = it.logs && it.logs[it.logs.length - 1];
             const src = last && last.src;
             const desc = (src && src.main_description) || '';
@@ -2276,7 +2278,7 @@
                     html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
                 }).from(holder).outputPdf('blob');
                 if (!blob) throw new Error('PDF 生成失敗');
-                const path = `quotes/${itemId}/付款注意單-${Date.now()}.pdf`;
+                const path = `quotes/${itemId}/payment-${Date.now()}.pdf`;
                 const file = new File([blob], '付款注意單.pdf', { type: 'application/pdf' });
                 const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
                     cacheControl: '31536000', upsert: false, contentType: 'application/pdf'
@@ -2290,6 +2292,7 @@
                 await loadEntries();
             } catch (err) {
                 say('listMsg', 'PDF 生成失敗：' + err.message, 'error');
+                try { alert('PDF 生成失敗：' + err.message); } catch (e) { /* 忽略 */ }
             } finally {
                 holder.remove();
             }
@@ -2421,6 +2424,10 @@
             // 需注意 / 完成付款 / 已核對：勾選即存
             box.querySelectorAll('[data-flag]').forEach(cb => {
                 cb.onchange = () => toggleFlag(cb.getAttribute('data-flag-item'), cb.getAttribute('data-flag'), cb.checked);
+            });
+            // 重新產生付款注意單 PDF
+            box.querySelectorAll('[data-regen-pdf]').forEach(btn => {
+                btn.onclick = () => generatePdf(btn.getAttribute('data-regen-pdf'));
             });
             // 核對人名字：填完即存
             box.querySelectorAll('[data-verify-name]').forEach(inp => {
