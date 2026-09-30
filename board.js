@@ -136,9 +136,13 @@ function buildTree(logs) {
     }
     for (const g of groups) {
         // 未完成：開案最久的排上面（放越久越要看到）；已完成：最新的排上面
-        g.items.sort((a, b) => g.status === 'completed'
-            ? String(b.opening).localeCompare(String(a.opening))
-            : String(a.opening).localeCompare(String(b.opening)));
+        // 長期維修工項一律沉到最下面
+        g.items.sort((a, b) => {
+            if (!!a.maintenance !== !!b.maintenance) return a.maintenance ? 1 : -1;
+            return g.status === 'completed'
+                ? String(b.opening).localeCompare(String(a.opening))
+                : String(a.opening).localeCompare(String(b.opening));
+        });
     }
     // 看板固定四欄（空的也留著，才看得出整個結構；空欄顯示 —）
     const shown = groups.slice();
