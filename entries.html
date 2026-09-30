@@ -231,7 +231,7 @@
         .flag-block .verify-name { width: 96px; padding: 0.15rem 0.4rem; font-size: 0.78rem; border: 1px solid var(--color-line); border-radius: 4px; cursor: text; }
         .flag-block .pdf-link { font-size: 0.78rem; }
         .flag-block .pdf-link a { color: var(--color-accent); text-decoration: underline; }
-        /* 付款摘要：匯款資料欄位（付款帳戶／金額／備註） */
+        /* 付款摘要：備註欄位 */
         .flag-block .pay-fields { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.5rem; background: #faf6ee; border-radius: 6px; border: 1px solid #e6dcc8; }
         .flag-block .pay-fields label { display: block; font-size: 0.75rem; color: var(--color-muted); }
         .flag-block .pay-fields input[type=text] { width: 100%; box-sizing: border-box; margin-top: 0.15rem; padding: 0.25rem 0.4rem; font-size: 0.8rem; border: 1px solid var(--color-line); border-radius: 4px; }
@@ -2245,8 +2245,6 @@
                 <label class="check-line"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需注意（整張卡變色凸顯）</label>
                 ${HAS_PAYMENT_FIELDS ? `
                 <div class="pay-fields">
-                    <label>付款帳戶<input type="text" data-pay-account="${esc(it.itemId)}" value="${esc(it.payment_account || '')}" placeholder="戶名／銀行／帳號（從匯款資料抄）"></label>
-                    <label>付款金額<input type="text" data-pay-amount="${esc(it.itemId)}" value="${esc(it.payment_amount || '')}" placeholder="例：NT$10,000 或 人民幣 5,000"></label>
                     <label>備註<input type="text" data-pdf-note="${esc(it.itemId)}" value="${esc(it.pdf_note || '')}" placeholder="資訊不夠完整時補充"></label>
                 </div>` : ''}
                 ${it.need_attention_pdf ? `<div class="pdf-link"><a href="${esc(it.need_attention_pdf)}" target="_blank" rel="noopener">📄 付款摘要 PDF</a> <button type="button" class="danger small" data-del-pdf="${esc(it.itemId)}">刪除</button></div>` : ''}
@@ -2283,7 +2281,7 @@
             }
         }
 
-        // 付款帳戶 / 付款金額 / 備註：填完（離開輸入框）就存，不重繪（避免輸入到一半被打斷）
+        // 備註：填完（離開輸入框）就存，不重繪（避免輸入到一半被打斷）
         async function savePayField(itemId, field, value) {
             try {
                 const { error } = await supabase.from('items')
@@ -2388,8 +2386,6 @@
             };
             const unpaid = last ? ((Number(last.fin) || 0) - (Number(last.paid) || 0)) : null;
             const verifiedBy = (it.verified && it.verified_by) ? String(it.verified_by).trim() : '';
-            const payAccount = (it.payment_account || '').trim();
-            const payAmount = (it.payment_amount || '').trim();
             const pdfNote = (it.pdf_note || '').trim();
             const html = `<div style="font-family:'PingFang TC','Microsoft JhengHei',sans-serif;padding:28px;color:#3d352d;font-size:14px;line-height:1.9;">
                 <h2 style="margin:0 0 16px;font-size:22px;text-align:center;">付款摘要</h2>
@@ -2400,9 +2396,7 @@
                 <div><b>施工事項：</b></div>
                 <div style="white-space:pre-wrap;">${desc ? esc(desc) : '（無描述）'}</div>
                 <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
-                <div><b>付款帳戶：</b></div>
-                <div style="white-space:pre-wrap;">${payAccount ? esc(payAccount) : '（尚未填寫）'}</div>
-                <div><b>付款金額：</b>${payAmount ? esc(payAmount) : '（尚未填寫）'}</div>
+                <div><b>付款資料：</b>詳見後附「付款資料」檔案</div>
                 ${quotes.length ? `<div>報價單：${quotes.map(q => esc(q.name)).join('、')}</div>` : ''}
                 ${pdfNote ? `<hr style="border:none;border-top:1px solid #ccc;margin:12px 0;"><div><b>備註：</b></div><div style="white-space:pre-wrap;">${esc(pdfNote)}</div>` : ''}
                 <hr style="border:none;border-top:1px solid #ccc;margin:12px 0;">
@@ -2626,13 +2620,7 @@
             box.querySelectorAll('[data-regen-pdf]').forEach(btn => {
                 btn.onclick = () => generatePdf(btn.getAttribute('data-regen-pdf'));
             });
-            // 付款帳戶 / 金額 / 備註：填完即存
-            box.querySelectorAll('[data-pay-account]').forEach(inp => {
-                inp.onchange = () => savePayField(inp.getAttribute('data-pay-account'), 'payment_account', inp.value);
-            });
-            box.querySelectorAll('[data-pay-amount]').forEach(inp => {
-                inp.onchange = () => savePayField(inp.getAttribute('data-pay-amount'), 'payment_amount', inp.value);
-            });
+            // 備註：填完即存
             box.querySelectorAll('[data-pdf-note]').forEach(inp => {
                 inp.onchange = () => savePayField(inp.getAttribute('data-pdf-note'), 'pdf_note', inp.value);
             });
