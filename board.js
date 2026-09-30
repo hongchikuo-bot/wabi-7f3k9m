@@ -127,6 +127,9 @@ function buildTree(logs) {
             verified_by: last.verified_by || null,
             need_attention_pdf: last.need_attention_pdf || null,
             payment_receipt: last.payment_receipt || null,
+            payment_account: last.payment_account || null,
+            payment_amount: last.payment_amount || null,
+            pdf_note: last.pdf_note || null,
         });
     }
     for (const g of groups) {
