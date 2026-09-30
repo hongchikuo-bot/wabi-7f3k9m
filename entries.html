@@ -662,6 +662,7 @@
             await probeCurrency();
             await probeAttentionPdf();
             await probePaymentFields();
+            await probeCostCompare();
             if (HAS_CURRENCY) await loadRates();
             if (!HAS_TODOS) await loadTodos();   // 先探一次（失敗也無所謂，畫面照常）
             await fetchMyName();
@@ -1211,6 +1212,15 @@
             return HAS_PAYMENT_FIELDS;
         }
 
+        // 費用比較檔案（items.cost_compare），獨立偵測
+        let HAS_COST_COMPARE = false;
+
+        async function probeCostCompare() {
+            const { error } = await supabase.from('items').select('cost_compare').limit(0);
+            HAS_COST_COMPARE = !error;
+            return HAS_COST_COMPARE;
+        }
+
         // 自己的顯示名稱（profiles 的 SELECT 政策允許讀「本人」）
         async function fetchMyName() {
             try {
@@ -1619,7 +1629,8 @@
                        + (HAS_QUOTES ? ', quotes' : '')
                        + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done, verified, verified_by' : '')
                        + (HAS_ATTENTION_PDF ? ', need_attention_pdf' : '')
-                       + (HAS_PAYMENT_FIELDS ? ', payment_account, payment_amount, pdf_note' : '') + ')')
+                       + (HAS_PAYMENT_FIELDS ? ', payment_account, payment_amount, pdf_note' : '')
+                       + (HAS_COST_COMPARE ? ', cost_compare' : '') + ')')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
@@ -1747,6 +1758,7 @@
                 payment_account: e.items ? e.items.payment_account : null,
                 payment_amount: e.items ? e.items.payment_amount : null,
                 pdf_note: e.items ? e.items.pdf_note : null,
+                cost_compare: e.items ? e.items.cost_compare : null,
             };
         }
 
@@ -2046,6 +2058,7 @@
                 ${(cost || it.status !== '_loose') ? `<div class="it-cost sheet-cost">${cost || '💰 尚未填費用'}
                     <button type="button" class="ghost small" data-cost-edit="${esc(it.itemId)}">${cost ? '改費用' : '填費用'}</button></div>` : ''}
                 ${costEditHtml(it)}
+                ${costCompareBlock(it)}
                 ${flagBlock(it)}
                 ${quoteBlock(it)}
                 ${todoBlock(it)}
@@ -2164,6 +2177,27 @@
             </div>`;
         }
 
+        // ---------- 費用比較（預估費用 vs 實際工程款的對比文件）----------
+        function costCompareBlock(it) {
+            if (it.status === '_loose' || !HAS_COST_COMPARE) return '';
+            const cs = it.cost_compare || [];
+            const list = cs.length
+                ? `<div class="quote-list">${cs.map((q, idx) => `
+                    <div class="quote-row">
+                        ${quoteThumb(q)}
+                        <a href="${esc(q.url || '')}" target="_blank" rel="noopener" class="quote-name">${esc(q.name || ('費用比較 ' + (idx + 1)))}</a>
+                        <button type="button" class="ghost small" data-cc-del="${esc(it.itemId)}" data-cc-url="${esc(q.url || '')}">刪除</button>
+                    </div>`).join('')}</div>`
+                : '<div class="hint">尚無費用比較檔案。</div>';
+            return `<div class="quote-block">
+                <div class="quote-head">📊 費用比較（預估 vs 實際工程款）</div>
+                ${list}
+                <label class="quote-add">＋ 上傳費用比較檔案
+                    <input type="file" multiple data-cc-file="${esc(it.itemId)}" style="display:none">
+                </label>
+            </div>`;
+        }
+
         // 上傳報價單：原檔上傳（不壓縮）→ items.quotes 追加（不覆蓋既有）
         async function uploadQuote(itemId, fileList) {
             if (!fileList || !fileList.length) return;
@@ -2243,6 +2277,65 @@
                 await loadEntries();
             } catch (err) {
                 say('listMsg', '改名失敗：' + err.message, 'error');
+            }
+        }
+
+        // 上傳費用比較檔案：原檔上傳（不壓縮）→ items.cost_compare 追加
+        async function uploadCostCompare(itemId, fileList) {
+            if (!fileList || !fileList.length) return;
+            const it = findBoardItem(itemId);
+            const files = Array.from(fileList);
+            say('listMsg', `上傳費用比較中（0/${files.length}）…`, 'info');
+            try {
+                const added = [];
+                let done = 0;
+                for (const f of files) {
+                    const ext = (f.name.split('.').pop() || 'bin').toLowerCase().slice(0, 10);
+                    const path = `cost-compare/${itemId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+                    const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, f, {
+                        cacheControl: '31536000', upsert: false,
+                        contentType: f.type || 'application/octet-stream'
+                    });
+                    if (error) throw new Error(`（${f.name}）${error.message}`);
+                    const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+                    added.push({ name: f.name, url: data.publicUrl });
+                    done++;
+                    say('listMsg', `上傳費用比較中（${done}/${files.length}）…`, 'info');
+                }
+                const existing = (it && Array.isArray(it.cost_compare)) ? it.cost_compare : [];
+                const { error } = await supabase.from('items')
+                    .update({ cost_compare: existing.concat(added) }).eq('id', itemId).select('id');
+                if (error) throw error;
+                say('listMsg', `✅ 已上傳 ${added.length} 份費用比較檔案`, 'ok');
+                await loadEntries();
+            } catch (err) {
+                say('listMsg', '費用比較上傳失敗：' + err.message, 'error');
+            }
+        }
+
+        // 刪除費用比較：Storage 檔 + items.cost_compare 移除該筆
+        async function deleteCostCompare(itemId, url) {
+            if (!url) return;
+            if (!confirm('刪除這份費用比較檔案？')) return;
+            const path = publicPathOf(url);
+            const it = findBoardItem(itemId);
+            const existing = (it && Array.isArray(it.cost_compare)) ? it.cost_compare : [];
+            const keep = existing.filter(q => q.url !== url);
+            try {
+                if (path) {
+                    const { data: removed, error } = await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+                    if (error) throw error;
+                    if (!removed || !removed.length) {
+                        say('listMsg', '⚠️ 檔案沒刪成（可能缺 Storage 刪除權限），但紀錄已移除', 'error');
+                    }
+                }
+                const { error } = await supabase.from('items')
+                    .update({ cost_compare: keep }).eq('id', itemId).select('id');
+                if (error) throw error;
+                say('listMsg', '費用比較檔案已刪除', 'ok');
+                await loadEntries();
+            } catch (err) {
+                say('listMsg', '費用比較刪除失敗：' + err.message, 'error');
             }
         }
 
@@ -2671,6 +2764,16 @@
             });
             box.querySelectorAll('[data-quote-del]').forEach(btn => {
                 btn.onclick = () => deleteQuote(btn.getAttribute('data-quote-del'), btn.getAttribute('data-quote-url'));
+            });
+            // 費用比較：上傳 + 刪除
+            box.querySelectorAll('[data-cc-file]').forEach(inp => {
+                inp.onchange = () => {
+                    uploadCostCompare(inp.getAttribute('data-cc-file'), inp.files);
+                    inp.value = '';
+                };
+            });
+            box.querySelectorAll('[data-cc-del]').forEach(btn => {
+                btn.onclick = () => deleteCostCompare(btn.getAttribute('data-cc-del'), btn.getAttribute('data-cc-url'));
             });
             // 需注意 / 完成付款 / 已核對：勾選即存
             box.querySelectorAll('[data-flag]').forEach(cb => {
