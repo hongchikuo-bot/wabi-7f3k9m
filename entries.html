@@ -649,6 +649,7 @@
             await probeRecorder();
             await probeQuotes();
             await probeCurrency();
+            await probeAttentionPdf();
             if (HAS_CURRENCY) await loadRates();
             if (!HAS_TODOS) await loadTodos();   // 先探一次（失敗也無所謂，畫面照常）
             await fetchMyName();
@@ -1180,6 +1181,15 @@
             return HAS_CURRENCY;
         }
 
+        // 需注意 PDF（need_attention_pdf）是後加的欄位，獨立偵測——沒跑 SQL 也不能讓整個記錄載入掛掉
+        let HAS_ATTENTION_PDF = false;
+
+        async function probeAttentionPdf() {
+            const { error } = await supabase.from('items').select('need_attention_pdf').limit(0);
+            HAS_ATTENTION_PDF = !error;
+            return HAS_ATTENTION_PDF;
+        }
+
         // 自己的顯示名稱（profiles 的 SELECT 政策允許讀「本人」）
         async function fetchMyName() {
             try {
@@ -1586,7 +1596,8 @@
                        + recCol + ', log_photos(' + photoCols + '), '
                        + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at'
                        + (HAS_QUOTES ? ', quotes' : '')
-                       + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done, verified, verified_by, need_attention_pdf' : '') + ')')
+                       + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done, verified, verified_by' : '')
+                       + (HAS_ATTENTION_PDF ? ', need_attention_pdf' : '') + ')')
                 .order('log_date', { ascending: false })
                 .limit(300);
 
