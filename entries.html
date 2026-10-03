@@ -231,15 +231,29 @@
         .procurement-toggle .check-line { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: #a06a00; cursor: pointer; }
         /* 需注意/完成付款 勾選框區塊 */
         .flag-block { margin: 0.6rem 0; padding: 0.6rem; border: 1px dashed var(--color-line); border-radius: 6px; display: flex; flex-direction: column; gap: 0.4rem; }
-        .flag-block .check-line { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--color-accent); cursor: pointer; }
-        .flag-block .verify-name { width: 96px; padding: 0.15rem 0.4rem; font-size: 0.78rem; border: 1px solid var(--color-line); border-radius: 4px; cursor: text; }
-        .flag-block .pdf-link { font-size: 0.78rem; }
-        .flag-block .pdf-link a { color: var(--color-accent); text-decoration: underline; }
-        /* 付款摘要：備註欄位 */
-        .flag-block .pay-fields { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.5rem; background: #faf6ee; border-radius: 6px; border: 1px solid #e6dcc8; }
-        .flag-block .pay-fields label { display: block; font-size: 0.75rem; color: var(--color-muted); }
-        .flag-block .pay-fields input[type=text] { width: 100%; box-sizing: border-box; margin-top: 0.15rem; padding: 0.25rem 0.4rem; font-size: 0.8rem; border: 1px solid var(--color-line); border-radius: 4px; }
-        .flag-block .pdf-link { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+        .check-line { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--color-accent); cursor: pointer; }
+        .verify-name { width: 96px; padding: 0.15rem 0.4rem; font-size: 0.78rem; border: 1px solid var(--color-line); border-radius: 4px; cursor: text; }
+        /* 付款摘要：備註欄位（費用區裡） */
+        .pay-fields { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.5rem; background: #faf6ee; border-radius: 6px; border: 1px solid #e6dcc8; margin-top: 0.4rem; }
+        .pay-fields label { display: block; font-size: 0.75rem; color: var(--color-muted); }
+        .pay-fields textarea { width: 100%; box-sizing: border-box; margin-top: 0.15rem; padding: 0.3rem 0.4rem; font-size: 0.8rem; border: 1px solid var(--color-line); border-radius: 4px; }
+        .pay-fields button { margin-top: 0.35rem; align-self: flex-start; }
+        .pdf-link { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.4rem; font-size: 0.78rem; }
+        .pdf-link a { color: var(--color-accent); text-decoration: underline; }
+        /* 浮層：進度列（一進浮層就看到，不用再按編輯） */
+        .status-block { margin: 0 0 0.9rem; padding: 0.6rem 0.7rem; border: 1px solid var(--color-line); border-radius: 6px; background: #fbf7f0; }
+        .status-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.9rem; }
+        .sb-fld { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.72rem; color: var(--color-accent); }
+        .sb-fld select, .sb-fld input { font-size: 0.82rem; padding: 0.25rem 0.4rem; }
+        .sb-fld input[type=text] { width: 88px; }
+        .sb-chk { font-size: 0.82rem; color: var(--color-text); display: inline-flex; align-items: center; gap: 0.3rem; }
+        .sb-hint { font-size: 0.7rem; color: var(--color-muted); flex-basis: 100%; }
+        .sb-maint { flex-basis: 100%; margin-top: 0.5rem; padding: 0.5rem 0.6rem; border: 1px dashed var(--color-line); border-radius: 6px; }
+        /* 浮層：費用一區（費用、報價單、費用比較、採購公開、付款） */
+        .cost-block { margin: 0 0 0.9rem; padding: 0.7rem 0.8rem; border: 1px dashed #d9c9a8; border-radius: 6px; background: #fffdf7; }
+        .cost-head { font-size: 0.88rem; font-weight: 600; color: var(--color-accent); margin-bottom: 0.5rem; }
+        .cost-block .cost-edit { border: none; padding: 0; margin: 0.4rem 0 0.5rem; }
+        .cost-block .flag-pay { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid #eadfcb; }
         /* 需注意 → 卡片變色凸顯 */
         .item-row.need-attention { background: #f6e6c4; border-left: 3px solid #d9a441; padding-left: 0.5rem; }
         .flag-warn { font-size: 0.72rem; color: #a06a00; font-weight: 600; white-space: nowrap; }
@@ -1888,19 +1902,22 @@
         }
 
         // 一筆紀錄（工項展開後看到的）
-        function boardRecord(l) {
+        function boardRecord(l, openId) {
             const e = l.src;
             const isDone = !!(e.items && e.items.status === 'completed');
             const showTodo = todosShown(e);
             const todos = todoLines(e.resolution);
             const recName = HAS_RECORDER ? String(e.recorder_name || '').trim() : '';
             const photo = (e.log_photos && e.log_photos[0]) || {};
+            // 最新那筆預設就攤開成可編輯（一進浮層就看得到欄位）；其他筆維持唯讀
+            const isOpen = e.id === (openId || editingEntryId);
             return `<div class="rec">
                 <div class="rec-head">
                     <span class="rec-date">${esc(e.log_date)}${e.log_time ? ' ' + esc(String(e.log_time).slice(0, 5)) : ''}</span>
                     ${recName ? `<span class="rec-by">紀錄：${esc(recName)}</span>` : ''}
                     ${isDone ? '<span class="badge done">已完成</span>' : ''}
                 </div>
+                ${isOpen ? '' : `
                 ${e.main_description ? `<div class="rec-desc">${esc(e.main_description)}</div>` : ''}
                 ${(showTodo && todos.length) ? `<div class="rec-todo">待辦：${esc(todos.join('、'))}</div>` : ''}
                 ${photo.photo_url
@@ -1909,10 +1926,10 @@
                           loading="lazy" onerror="this.style.visibility='hidden'"></a>`
                     : ''}
                 ${(e.log_photos && e.log_photos.length > 1)
-                    ? `<div class="rec-shot-count">共 ${e.log_photos.length} 張照片</div>` : ''}
-                ${editingEntryId === e.id ? renderEditForm(e) : ''}
+                    ? `<div class="rec-shot-count">共 ${e.log_photos.length} 張照片</div>` : ''}`}
+                ${isOpen ? renderEditForm(e) : ''}
                 <div class="rec-actions">
-                    <button class="ghost small" data-edit="${esc(e.id)}">編輯</button>
+                    ${isOpen ? '' : `<button class="ghost small" data-edit="${esc(e.id)}">編輯</button>`}
                     <button class="danger small" data-del="${esc(e.id)}">刪除</button>
                 </div>
             </div>`;
@@ -2122,8 +2139,10 @@
                 it.byNames.length ? it.byNames.join('、') : '',
                 it.completed_by ? '結案：' + it.completed_by : '',
             ].filter(Boolean).join(' · ');
-            const last = it.logs && it.logs[it.logs.length - 1];
-            const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.estimate_currency, last.final_currency) : '';
+            const logs = it.logs || [];
+            const newest = logs.length ? logs[logs.length - 1] : null;
+            // 一進浮層就把「最新那筆」攤開成可編輯；其他筆維持唯讀（要改再按編輯）
+            const openId = editingEntryId || (newest && newest.src ? newest.src.id : null);
             return `
                 <div class="sheet-head">
                     <span class="sheet-title">${esc(it.title)}</span>
@@ -2134,21 +2153,16 @@
                     <button type="button" class="sheet-close" title="關閉">&times;</button>
                 </div>
                 <div class="sheet-meta">${esc(meta)}</div>
+                ${statusBlock(it)}
                 ${it.maintenance ? `
                 <div class="maint-sheet-row">
                     <label>🔧 下次維修時間</label>
                     <input type="date" id="maint-next-input" value="${esc(it.next_maintenance_at || '')}">
                     <button type="button" class="primary small" data-maint-save="${esc(it.itemId)}">儲存</button>
                 </div>` : ''}
-                ${(cost || it.status !== '_loose') ? `<div class="it-cost sheet-cost">${cost || '💰 尚未填費用'}
-                    <button type="button" class="ghost small" data-cost-edit="${esc(it.itemId)}">${cost ? '改費用' : '填費用'}</button></div>` : ''}
-                ${costEditHtml(it)}
-                ${costCompareBlock(it)}
-                ${procurementToggle(it)}
-                ${flagBlock(it)}
-                ${quoteBlock(it)}
+                ${costBlock(it)}
                 ${todoBlock(it)}
-                ${it.logs.map(boardRecord).join('')}`;
+                ${logs.map(l => boardRecord(l, openId)).join('')}`;
         }
 
         function openItemSheet(itemId) {
@@ -2182,7 +2196,7 @@
             const finCur = item.final_currency || '';
             const curOpts = k => CURRENCY_OPTIONS.map(([v, l]) =>
                 `<option value="${v}"${k === v ? ' selected' : ''}>${l}</option>`).join('');
-            return `<div class="cost-edit hidden" data-cost-edit-box="${esc(it.itemId)}">
+            return `<div class="cost-edit" data-cost-edit-box="${esc(it.itemId)}">
                 <div class="cost-edit-grid">
                     <label>預估款
                         <span class="cur-amt">${HAS_CURRENCY ? `<select data-cost-currency="estimate">${curOpts(estCur)}</select>` : ''}
@@ -2197,7 +2211,6 @@
                 ${rateRow()}
                 <div class="cost-edit-actions">
                     <button type="button" class="primary small" data-cost-save="${esc(it.itemId)}">儲存費用</button>
-                    <button type="button" class="ghost small" data-cost-cancel="${esc(it.itemId)}">取消</button>
                 </div>
             </div>`;
         }
@@ -2435,23 +2448,78 @@
         }
 
         // ---------- 需注意 / 完成付款（掛在工項上）----------
-        function flagBlock(it) {
+        // 進度列（浮層最上面，一進去就看到，不用再按編輯）：
+        //   進度 ＋ 已核對／核對人 ＋ 結案執行者 ＋ 需注意 —— 橫排，窄螢幕自動折行
+        function statusBlock(it) {
+            if (it.status === '_loose') return '';
+            const st = it.status || '';
+            const opts = [['', '開案（已建立、還沒動工）'], ['in_progress', '進行中'], ['paused', '暫停'], ['completed', '已完成']]
+                .map(([v, l]) => `<option value="${v}"${st === v ? ' selected' : ''}>${l}</option>`).join('');
+            return `<div class="status-block">
+                <div class="status-row">
+                    <label class="sb-fld">進度
+                        <select data-sheet-status="${esc(it.itemId)}">${opts}</select></label>
+                    ${HAS_CURRENCY ? `
+                    <label class="sb-chk"><input type="checkbox" data-flag="verified" data-flag-item="${esc(it.itemId)}"${it.verified ? ' checked' : ''}>已核對</label>
+                    <label class="sb-fld">核對人
+                        <input type="text" class="verify-name" data-verify-name="${esc(it.itemId)}" value="${esc(it.verified_by || '')}" placeholder="填名字"></label>` : ''}
+                    ${HAS_COMPLETED_BY ? `
+                    <label class="sb-fld">結案執行者
+                        <input type="text" class="verify-name" data-completed-by="${esc(it.itemId)}" value="${esc(it.completed_by || '')}" placeholder="填名字"></label>` : ''}
+                    ${HAS_CURRENCY ? `
+                    <label class="sb-chk"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需注意</label>` : ''}
+                    <span class="sb-hint">「開案 / 進行中 / 暫停」都是未完成；選「已完成」整張卡就結案。</span>
+                    ${(st === 'completed' && !it.maintenance) ? maintCreateBlock(it) : ''}
+                </div>
+            </div>`;
+        }
+
+        // 標記「已完成」時，順便可建立「長期維修」工項（完工後要定期回來做的）
+        function maintCreateBlock(it) {
+            return `<div class="sb-maint">
+                <label class="sb-chk"><input type="checkbox" id="sheet-maint-on">完工後有<strong>長期維修</strong>需求</label>
+                <div id="sheet-maint-fields" style="display:none">
+                    <div class="status-row" style="margin-top:6px">
+                        <label class="sb-fld">維修名稱
+                            <input type="text" id="sheet-maint-name" placeholder="留空＝用這個工項名"></label>
+                        <label class="sb-fld">下次維修時間
+                            <input type="date" id="sheet-maint-next"></label>
+                        <button type="button" class="ghost small" data-maint-create="${esc(it.itemId)}">建立維修工項</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        // 付款（歸類在費用區裡面）
+        function payBlock(it) {
             if (it.status === '_loose' || !HAS_CURRENCY) return '';
-            return `<div class="flag-block">
-                <label class="check-line">
-                    <input type="checkbox" data-flag="verified" data-flag-item="${esc(it.itemId)}"${it.verified ? ' checked' : ''}>已核對
-                    <input type="text" class="verify-name" data-verify-name="${esc(it.itemId)}" value="${esc(it.verified_by || '')}" placeholder="核對人">
-                </label>
-                ${HAS_COMPLETED_BY ? `<label class="check-line">結案執行者 <input type="text" class="verify-name" data-completed-by="${esc(it.itemId)}" value="${esc(it.completed_by || '')}" placeholder="填名字"></label>` : ''}
-                <label class="check-line"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需注意（整張卡變色凸顯）</label>
+            return `<div class="flag-pay">
+                <label class="check-line"><input type="checkbox" data-flag="payment_done" data-flag-item="${esc(it.itemId)}"${it.payment_done ? ' checked' : ''}>完成付款（恢復卡片顏色）</label>
                 ${HAS_PAYMENT_FIELDS ? `
                 <div class="pay-fields">
-                    <label>付款資料（備註）<textarea data-pdf-note="${esc(it.itemId)}" rows="6" placeholder="點下方「掃描付款資料」自動帶入，可在此核對修改">${esc(it.pdf_note || '')}</textarea></label>
+                    <label>付款資料（備註）<textarea data-pdf-note="${esc(it.itemId)}" rows="3" placeholder="點下方「掃描付款資料」自動帶入，可在此核對修改">${esc(it.pdf_note || '')}</textarea></label>
                     <button type="button" class="ghost small" data-scan-pay="${esc(it.itemId)}">🔍 掃描付款資料</button>
                 </div>` : ''}
-                ${it.need_attention_pdf ? `<div class="pdf-link"><a href="${esc(it.need_attention_pdf)}" target="_blank" rel="noopener">📄 付款摘要 PDF</a> <button type="button" class="danger small" data-del-pdf="${esc(it.itemId)}">刪除</button></div>` : ''}
-                <button type="button" class="ghost small" data-regen-pdf="${esc(it.itemId)}">產生付款摘要 PDF</button>
-                <label class="check-line"><input type="checkbox" data-flag="payment_done" data-flag-item="${esc(it.itemId)}"${it.payment_done ? ' checked' : ''}>完成付款（恢復卡片顏色）</label>
+                <div class="pdf-link">
+                    <button type="button" class="ghost small" data-regen-pdf="${esc(it.itemId)}">產生付款摘要 PDF</button>
+                    ${it.need_attention_pdf ? `<a href="${esc(it.need_attention_pdf)}" target="_blank" rel="noopener">📄 付款摘要 PDF</a><button type="button" class="danger small" data-del-pdf="${esc(it.itemId)}">刪除</button>` : ''}
+                </div>
+            </div>`;
+        }
+
+        // 費用一區（全部錢的事都在這裡）：費用 ＋ 報價單 ＋ 費用比較 ＋ 採購公開 ＋ 付款
+        function costBlock(it) {
+            if (it.status === '_loose') return '';
+            const last = it.logs && it.logs[it.logs.length - 1];
+            const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.estimate_currency, last.final_currency) : '';
+            return `<div class="cost-block">
+                <div class="cost-head">💰 費用</div>
+                <div class="money">${cost || '尚未填費用'}</div>
+                ${costEditHtml(it)}
+                ${quoteBlock(it)}
+                ${costCompareBlock(it)}
+                ${procurementToggle(it)}
+                ${payBlock(it)}
             </div>`;
         }
 
@@ -2780,6 +2848,57 @@
             }
         }
 
+        // 浮層最上面的「進度」→ 直接改進度卡狀態（items.status 是唯一真相）
+        // 維修工項改成「已完成」→ 自動排下一個維修（沿用原本的循環行為）
+        async function setSheetStatus(itemId, status) {
+            const val = status || null;
+            try {
+                const { error } = await supabase.from('items')
+                    .update({ status: val }).eq('id', itemId).select('id');
+                if (error) throw error;
+                let note = '';
+                const it = findBoardItem(itemId);
+                if (val === 'completed' && it && it.maintenance) {
+                    const src = it.logs && it.logs[0] && it.logs[0].src;
+                    if (src) {
+                        try {
+                            const nxt = await spawnMaintenanceItem(src.project_id, src.node_id, it.title, null);
+                            note = `，並排下一個維修「${nxt.title}」（下次維修時間待填）`;
+                        } catch (mErr) {
+                            note = `\n⚠️ 下一個維修工項生成失敗：${mErr.message}`;
+                        }
+                    }
+                }
+                say('listMsg', `進度已改為「${STATUS_LABEL[val || ''] || '開案'}」${note}`,
+                    note.includes('⚠️') ? 'error' : 'ok');
+                await loadEntries();
+                await loadStructureOptions($('project_id').value);
+            } catch (err) {
+                say('listMsg', '進度更新失敗：' + err.message, 'error');
+                await loadEntries();
+            }
+        }
+
+        // 浮層「已完成」時出現的「長期維修」→ 建立一張維修工項
+        async function createSheetMaintenance(itemId) {
+            const it = findBoardItem(itemId);
+            const src = it && it.logs && it.logs[0] && it.logs[0].src;
+            if (!src) return say('listMsg', '找不到這張卡的專案／地點，無法建立維修工項', 'error');
+            const name = ($('sheet-maint-name') && $('sheet-maint-name').value.trim())
+                || (it && it.title) || '長期維修';
+            const next = $('sheet-maint-next') ? ($('sheet-maint-next').value || null) : null;
+            try {
+                const m = await spawnMaintenanceItem(src.project_id, src.node_id, name, next);
+                say('listMsg', next
+                    ? `✅ 已建立維修工項「${m.title}」（下次 ${next}）`
+                    : `✅ 已建立維修工項「${m.title}」（下次維修時間待填）`, 'ok');
+                await loadEntries();
+                await loadStructureOptions($('project_id').value);
+            } catch (err) {
+                say('listMsg', '維修工項建立失敗：' + err.message, 'error');
+            }
+        }
+
         function closeItemSheet() {
             // 關閉前把備註欄未保存的內容存起來（避免編輯到一半就丟失）
             if (OPEN_ITEM) {
@@ -2867,6 +2986,19 @@
             });
             box.querySelectorAll('[data-cost-cancel]').forEach(btn => {
                 btn.onclick = () => toggleCostEdit(btn.getAttribute('data-cost-cancel'));
+            });
+            // 浮層最上面的「進度」→ 直接改進度卡狀態
+            box.querySelectorAll('[data-sheet-status]').forEach(sel => {
+                sel.onchange = () => setSheetStatus(sel.getAttribute('data-sheet-status'), sel.value);
+            });
+            // 「完工後有長期維修需求」→ 展開名稱／日期／建立按鈕
+            const maintOn = box.querySelector('#sheet-maint-on');
+            if (maintOn) maintOn.onchange = () => {
+                const f = box.querySelector('#sheet-maint-fields');
+                if (f) f.style.display = maintOn.checked ? 'block' : 'none';
+            };
+            box.querySelectorAll('[data-maint-create]').forEach(btn => {
+                btn.onclick = () => createSheetMaintenance(btn.getAttribute('data-maint-create'));
             });
             // 維修工項浮層：儲存「下次維修時間」
             box.querySelectorAll('[data-maint-save]').forEach(btn => {
@@ -3017,35 +3149,8 @@
                     <div class="full"><label>備註</label>
                         <textarea id="ee-notes" rows="2">${esc(e.notes || '')}</textarea></div>
                 </div>
-                <div class="sub-label">進度</div>
-                <label class="check-line" style="font-size:13px">
-                    <input type="checkbox" id="ee-complete"${done ? ' checked' : ''}>
-                    <span>這個工項<strong>已完成</strong></span>
-                </label>
-                <label class="ee-taken-label">還沒完成的話，現在的狀態</label>
-                <select id="ee-status"${(!curWT || done) ? ' disabled' : ''}>
-                    <option value=""${curStatus === '' ? ' selected' : ''}>開案（已建立、還沒動工）</option>
-                    <option value="in_progress"${curStatus === 'in_progress' ? ' selected' : ''}>進行中</option>
-                    <option value="paused"${curStatus === 'paused' ? ' selected' : ''}>暫停</option>
-                </select>
 
-                <!-- 長期維修：勾「已完成」後才出現；勾了再出現名稱＋下次維修時間 -->
-                <div id="ee-maint-wrap" style="display:none; margin-top:10px; padding:10px; border:1px dashed var(--color-line); border-radius:6px;">
-                    <label class="check-line" style="font-size:13px">
-                        <input type="checkbox" id="ee-maintenance">
-                        <span>完工後有<strong>長期維修</strong>需求</span>
-                    </label>
-                    <div id="ee-maint-date-wrap" style="display:none; margin-top:8px;">
-                        <label>維修名稱</label>
-                        <input type="text" id="ee-maint-name" placeholder="例：空調保養（留空＝用這個工項名）">
-                        <label style="margin-top:8px;">下次維修時間</label>
-                        <input type="date" id="ee-next-maint">
-                    </div>
-                </div>
-
-                <div class="hint">${curWT
-                    ? '「開案 / 進行中 / 暫停」都是未完成；勾了上面的「已完成」就不用選。'
-                    : '要能設定狀態，請先在上面填「工項」——狀態是記在進度卡上。'}</div>
+                <div class="hint">「進度」（開案 / 進行中 / 暫停 / 已完成）已經移到浮層最上面，這裡不用再選。</div>
 
                 <div class="sub-label">照片（${photos.length} 張）</div>
                 ${photoHtml}
@@ -3216,25 +3321,18 @@
 
             const nodeId = $('ee-node').value || null;
             const wt = $('ee-worktype') ? $('ee-worktype').value.trim() : '';
-            const complete = !!($('ee-complete') && $('ee-complete').checked);
-            // 未完成時的狀態：'' ＝ 開案（已建立、還沒動工）／ in_progress ／ paused
-            const statusChoice = complete ? 'completed'
-                : String(($('ee-status') && $('ee-status').value) || '');
             const saveBtn = $('entries') && $('entries').querySelector
                 ? $('entries').querySelector('[data-save-edit]') : null;
 
-            if (complete && !wt) {
-                return say('listMsg',
-                    '要標記「已完成」，請先填工項 —— 完成狀態是記在「地點 × 工項」的進度卡上。', 'error');
-            }
-
             // 工項 → 對應到「該地點 × 該工項」的進度卡（沒有就建一張）
             let itemId = null;
+            let itemStatusNow = null;
             if (wt) {
                 if (!nodeId) return say('listMsg', '要指定工項，請先選地點（進度卡是「地點 × 工項」）。');
                 try {
                     const row = await ensureItemFor(e.project_id, nodeId, wt);
                     itemId = row ? row.id : null;
+                    itemStatusNow = row ? (row.status ?? null) : null;
                 } catch (err) {
                     return say('listMsg', err.message);
                 }
@@ -3272,8 +3370,8 @@
                 issues_found: valOrNull('ee-issues'),
                 resolution: valOrNull('ee-resolution'),
                 notes: valOrNull('ee-notes'),
-                // 進度快照跟著進度卡的狀態走
-                progress_status: itemId ? (complete ? 'completed' : (statusChoice || null)) : null
+                // 進度快照＝送出當下那張進度卡的狀態（進度現在在浮層最上面改）
+                progress_status: itemId ? itemStatusNow : null
             };
             // log_time 是 NOT NULL：留空時「不要送這個欄位」，保留原本的值
             const t = $('ee-time').value;
@@ -3332,60 +3430,15 @@
                 orderNote = `\n⚠️ 照片順序重排失敗：${err.message}`;
             }
 
-            // ③ 進度卡的完成狀態（items.status 是唯一真相，公開頁面也讀這個）
-            let statusNote = '';
-            let spawnNextFor = null;
-            if (itemId) {
-                const { error: uErr } = await supabase.from('items')
-                    .update({ status: complete ? 'completed' : (statusChoice || null) }).eq('id', itemId);
-                if (uErr) statusNote = `（但進度卡狀態更新失敗：${uErr.message}）`;
-                else statusNote = `，這個工項標記為「${statusText(statusChoice)}」`;
-                // 維修工項完成 → 自動生成下一個（循環）
-                const thisRow = ITEMS_BY_ID.get(itemId);
-                if (complete && thisRow && thisRow.maintenance) spawnNextFor = thisRow;
-            }
-
-            // 長期維修：勾「已完成」＋「長期維修」→ 生成一個「獨立維修工項」
-            // 若結案的是「維修工項」本身，這日期直接作為「下一個維修」的時間，不再多生成一筆
-            let nextMaintForCycle = null;
-            if (itemId && complete && $('ee-maintenance') && $('ee-maintenance').checked) {
-                const name = ($('ee-maint-name') && $('ee-maint-name').value.trim()) || wt || '長期維修';
-                const nextEl = $('ee-next-maint');
-                const nextMaint = nextEl ? (nextEl.value || null) : null;
-                if (spawnNextFor) {
-                    nextMaintForCycle = nextMaint;
-                } else {
-                    try {
-                        const m = await spawnMaintenanceItem(e.project_id, nodeId, name, nextMaint);
-                        statusNote += nextMaint
-                            ? `，並生成維修工項「${m.title}」（下次 ${nextMaint}）`
-                            : `，並生成維修工項「${m.title}」（下次維修時間待填）`;
-                    } catch (mErr) {
-                        statusNote += `\n⚠️ 維修工項生成失敗：${mErr.message}`;
-                    }
-                }
-            }
-
-            // 維修工項完成 → 自動生成下一個（名稱沿用；下次時間＝上面填的日期，或待填）
-            if (spawnNextFor) {
-                try {
-                    const nxt = await spawnMaintenanceItem(e.project_id, spawnNextFor.node_id,
-                        workTypeOf(spawnNextFor), nextMaintForCycle);
-                    statusNote += nextMaintForCycle
-                        ? `，並排下一個維修「${nxt.title}」（下次 ${nextMaintForCycle}）`
-                        : `，並排下一個維修「${nxt.title}」（下次維修時間待填）`;
-                } catch (mErr) {
-                    statusNote += `\n⚠️ 下一個維修工項生成失敗：${mErr.message}`;
-                }
-            }
-
+            // 進度（items.status）現在在浮層最上面改，存紀錄時不動它 ——
+            // 這筆只把「當下那張卡的狀態」寫成紀錄的快照（progress_status）。
             unlock();
             editingEntryId = null;
             EDIT_FILES = [];
             EDIT_URLS = [];
-            const bad = [photoNote, dateNote, orderNote, statusNote]
+            const bad = [photoNote, dateNote, orderNote]
                 .some(s => s.includes('失敗') || s.includes('⚠️'));
-            say('listMsg', `✅ 紀錄已更新${photoNote}${SHRINK_NOTE}${dateNote}${orderNote}${statusNote}。`
+            say('listMsg', `✅ 紀錄已更新${photoNote}${SHRINK_NOTE}${dateNote}${orderNote}。`
                 + '公開頁面重新整理即可看到（照片順序以拍攝日期為準）。', bad ? 'error' : 'ok');
             await loadEntries();
             await loadStructureOptions($('project_id').value);
