@@ -665,11 +665,31 @@ let editingItemId = null;
 // 同一個工項在 1F、2F 各自是一筆項目（進度與費用不同），
 // 但在這裡可以把它們收在一起看總金額與總進度。
 let itemView = 'node';   // 'node' = 依地點（樹）／'work' = 依工項
+let emptyOnly = false;   // true = 只列「還沒有任何紀錄」的卡（公開看板看不到的那些）
 
 function syncViewToggle() {
   const btn = $('viewToggleBtn');
   if (btn) btn.textContent = itemView === 'node' ? '依工項彙總' : '← 回依地點';
+  const eb = $('emptyFilterBtn');
+  if (eb) {
+    eb.textContent = emptyOnly ? '← 回全部項目' : '只看尚未開卡';
+    eb.style.background = emptyOnly ? '#efe7d6' : '';
+  }
 }
+
+// 只看／不看「尚未開卡」（沒有任何紀錄 → 公開看板上看不到）
+export function toggleEmptyFilter() {
+  emptyOnly = !emptyOnly;
+  renderProjectItems();
+  bindStructureActions();
+}
+window.toggleEmptyFilter = toggleEmptyFilter;
+
+// 沒有紀錄的卡＝公開看板看不到的那些；用灰字標出來，避免「卡片默默消失」
+const noLogChip = i => (currentLogCounts[i.id] || 0)
+  ? ''
+  : '<span class="chip" style="background:#efe7d6;color:#8a6a1e">尚未開卡</span>';
+const noLogFilter = i => !(currentLogCounts[i.id] || 0);
 
 export function toggleItemView() {
   itemView = itemView === 'node' ? 'work' : 'node';
@@ -681,8 +701,9 @@ export function toggleItemView() {
 const workTypeOf = i => String(i.work_type || i.title || '（未命名）').trim();
 
 function renderItemsByWorkType(box, nodeName, statusOptions, payOptions, prefix = '') {
+  const src = emptyOnly ? currentItems.filter(noLogFilter) : currentItems;
   const groups = new Map();
-  currentItems.forEach(i => {
+  src.forEach(i => {
     const k = workTypeOf(i);
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(i);
@@ -708,6 +729,7 @@ function renderItemsByWorkType(box, nodeName, statusOptions, payOptions, prefix 
       return `
       <div class="wt-row">
         <span class="wt-loc">${esc(nodeName(i.node_id))}</span>
+        ${noLogChip(i)}
         <select class="status-select" data-item-status="${esc(i.id)}">${opts}</select>
         <span class="chip money">${money(i.estimated_cost)}</span>
         ${hasFin ? `<span class="chip money">→ ${money(i.final_cost)}</span>` : ''}
@@ -764,18 +786,30 @@ function renderProjectItems() {
   syncViewToggle();
   const dupHtml = dupOpen ? dupForm(nodeName) : '';
   const batchHtml = batchOpen ? batchForm() : '';
+  const list = emptyOnly ? currentItems.filter(noLogFilter) : currentItems;
 
   if (itemView === 'work') {
     renderItemsByWorkType(box, nodeName, statusOptions, payOptions, dupHtml);
     return;
   }
 
-  if (!currentItems.length) {
-    box.innerHTML = dupHtml + batchHtml + '<div class="empty">尚未建立項目。</div>';
+  // 「只看尚未開卡」時的說明列（公開看板看不到這些，所以在這裡點出來）
+  const emptyNote = emptyOnly
+    ? `<div class="item-card" style="border-left:3px solid #c9b98f;margin-bottom:10px">
+         <div class="item-head"><strong>只看尚未開卡</strong>
+           <span class="row-actions"><span class="chip">${list.length} 張</span>
+             <button class="btn-sm btn-ghost" onclick="toggleEmptyFilter()">顯示全部</button></span></div>
+         <p class="hint">這些卡片還沒有任何紀錄，所以公開看板看不到（不是壞掉，是還沒開始）。
+            不要的就按右邊「刪除」。</p>
+       </div>` : '';
+
+  if (!list.length) {
+    box.innerHTML = dupHtml + batchHtml + emptyNote
+      + `<div class="empty">${emptyOnly ? '沒有「尚未開卡」的項目。' : '尚未建立項目。'}</div>`;
     return;
   }
 
-  box.innerHTML = dupHtml + batchHtml + currentItems.map(i => {
+  box.innerHTML = dupHtml + batchHtml + emptyNote + list.map(i => {
     if (editingItemId === i.id) return itemEditForm(i, nodeName, payOptions);
     const logCount = currentLogCounts[i.id] || 0;
 
@@ -790,6 +824,7 @@ function renderProjectItems() {
     <div class="item-card">
       <div class="item-head">
         <strong>${esc(i.title)}</strong>
+        ${logCount ? '' : '<span class="chip" style="background:#efe7d6;color:#8a6a1e">尚未開卡</span>'}
         <span class="row-actions">
           <button class="btn-sm btn-ghost" data-item-timeline="${esc(i.id)}">進度歷程${logCount ? ` (${logCount})` : ''}</button>
           <button class="btn-sm btn-ghost" data-edit-item="${esc(i.id)}">編輯</button>
