@@ -101,11 +101,6 @@
         }
         .photo-item .taken-warn { font-size: 10px; color: #8b2e2e; margin-top: 2px; }
         .sub-label { font-size: 12px; color: var(--color-accent); margin-top: 12px; }
-        .list-tools {
-            display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-            margin: 6px 0 14px;
-        }
-        .list-tools .hint { margin-top: 0; flex: 1 1 200px; }
 
         /* 該項目的最新紀錄 + 模式切換 */
         .latest-box {
@@ -548,6 +543,8 @@
                 </div>
                 <div id="photoPreview"></div>
                 <div id="uploadProgress" class="progress"></div>
+                <div class="hint">照片會自動壓縮：上傳時就縮到最長邊 2000px（印 4×6 相片仍有 330dpi），不用手動處理。
+                    順序會依<strong>拍攝日期</strong>自動排好，不用自己整理。</div>
             </div>
 
             <!-- 貼網址的功能已移除（大家都直接傳照片）；保留容器給程式相容 -->
@@ -561,14 +558,6 @@
         <div class="card hidden" id="listCard">
             <h2>工程紀錄</h2>
             <div id="listMsg"></div>
-            <div class="list-tools">
-                <button type="button" class="ghost small" id="reorderBtn">🖼 整理照片順序</button>
-                <div class="hint">
-                    <strong>整理照片順序</strong>：把下面這幾筆的照片重新編號（先依拍攝日期，同一天再依上傳時間）。
-                    舊紀錄（每張的順序都是 0）按一次就會排好，公開頁的第一張照片也會跟著修正。<br>
-                    <strong>照片會自動壓縮</strong>：上傳時就縮到最長邊 2000px（印 4×6 相片仍有 330dpi），不用手動處理。
-                </div>
-            </div>
             <div id="entries"></div>
         </div>
 
@@ -3539,43 +3528,10 @@
             await loadEntries();
         }
 
-        // ---------- 一鍵整理照片順序（修舊資料用）----------
-        async function reorderAllPhotos() {
-            if (!HAS_TAKEN_AT) {
-                return say('listMsg',
-                    '拍攝日期功能還沒啟用（資料庫缺 log_photos.taken_at）→ 無法整理照片順序。', 'error');
-            }
-            if (!entryList.length) return say('listMsg', '目前沒有紀錄。', 'info');
-            const targets = entryList.filter(e => (e.log_photos || []).length > 1);
-            if (!targets.length) {
-                return say('listMsg', '這幾筆紀錄的照片都不到 2 張，不需要整理。', 'info');
-            }
-            const ok = confirm(`要重新整理這 ${targets.length} 筆紀錄的照片順序嗎？\n\n`
-                + '規則：先依「拍攝日期」，同一天再依「上傳時間」。\n'
-                + '只會改排列順序，不會刪除或修改照片本身。');
-            if (!ok) return;
-
-            const btn = $('reorderBtn');
-            if (btn) btn.disabled = true;
-            let changed = 0, failed = 0, errs = 0;
-            for (const e of targets) {
-                try {
-                    const r = await reorderLogPhotos(e.id, e.log_date);
-                    changed += r.changed;
-                    failed += r.failed;
-                } catch (err) {
-                    errs++;
-                }
-            }
-            if (btn) btn.disabled = false;
-            const bad = failed > 0 || errs > 0;
-            say('listMsg',
-                `已整理 ${targets.length} 筆紀錄的照片順序，改了 ${changed} 張`
-                + (failed ? `\n⚠️ 有 ${failed} 張沒寫進去（可能缺少 UPDATE 權限）。` : '')
-                + (errs ? `\n⚠️ 有 ${errs} 筆讀取失敗。` : '。公開頁重新整理即可看到。'),
-                bad ? 'error' : 'ok');
-            await loadEntries();
-        }
+        // ---------- 照片順序 ----------
+        // 舊資料（sort_order 全是 0）已經在 2026-10 前整理完，線上也確認沒有排序異常；
+        // 現在新照片上傳時就編號、每次儲存紀錄也會依拍攝日期自動重排 → 不需要手動整理的按鈕了。
+        // （每人工具：reorderLogPhotos / reorderNote —— 儲存紀錄時會用到）
 
         // 刪除單張照片（Storage 檔案 + log_photos 那一列）
         async function deletePhoto(logId, photoId, photoUrl) {
@@ -3660,7 +3616,6 @@
         $('submitBtn').onclick = () => submitEntry();
         $('changePwBtn').onclick = changePassword;
         $('saveNameBtn').onclick = saveDisplayName;
-        $('reorderBtn').onclick = reorderAllPhotos;
         $('formHead').onclick = () => setFormOpen();   // 點標題 → 展開／收起
         // 浮層：按 Esc 關閉（點背景不關閉，避免誤觸丟失編輯）
         document.addEventListener('keydown', e => { if (e.key === 'Escape') closeItemSheet(); });
