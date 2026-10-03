@@ -683,6 +683,7 @@
             await probeCostCompare();
             await probeProcurementPublic();
             await probeCompletedBy();
+            await probeFinishAt();
             if (HAS_CURRENCY) await loadRates();
             if (!HAS_TODOS) await loadTodos();   // 先探一次（失敗也無所謂，畫面照常）
             await fetchMyName();
@@ -1295,6 +1296,15 @@
             return HAS_COMPLETED_BY;
         }
 
+        // 預估完成時間（items.end_date —— 這個欄位原本就在表裡、一直沒在用）
+        let HAS_FINISH_AT = false;
+
+        async function probeFinishAt() {
+            const { error } = await supabase.from('items').select('end_date').limit(0);
+            HAS_FINISH_AT = !error;
+            return HAS_FINISH_AT;
+        }
+
         // 自己的顯示名稱（profiles 的 SELECT 政策允許讀「本人」）
         async function fetchMyName() {
             try {
@@ -1708,6 +1718,7 @@
                        + 'issues_found, resolution, notes, project_id, item_id, node_id, created_at'
                        + recCol + ', log_photos(' + photoCols + '), '
                        + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at'
+                       + (HAS_FINISH_AT ? ', end_date' : '')
                        + (HAS_QUOTES ? ', quotes' : '')
                        + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done, verified, verified_by' : '')
                        + (HAS_ATTENTION_PDF ? ', need_attention_pdf' : '')
@@ -1845,6 +1856,8 @@
                 cost_compare: e.items ? e.items.cost_compare : null,
                 procurement_public: e.items ? e.items.procurement_public : null,
                 completed_by: e.items ? e.items.completed_by : null,
+                // 預估完成時間（items.end_date）
+                finish_at: e.items ? (e.items.end_date || null) : null,
             };
         }
 
@@ -1952,10 +1965,10 @@
 
         function todoBlock(it) {
             if (!HAS_TODOS || it.status === '_loose') return '';
+            // 不在這裡「新增待辦」—— 新增走下面紀錄表單的「待辦事項 / 下一步」，免得兩處重複
             return `<div class="todos">
                 <div class="todos-head">待辦事項</div>
                 ${todoListHtml(it.itemId)}
-                <button type="button" class="ghost small" data-add-todo="${esc(it.itemId)}">＋ 新增待辦</button>
             </div>`;
         }
 
@@ -2045,13 +2058,15 @@
         }
 
         function boardItem(it) {
+            // 卡片摘要：只留「已 N 天」＋「預估完成」（開案日、筆數、照片數都不用）
             const meta = [];
-            if (it.opening) meta.push(fmtMonthDay(it.opening) + ' 開案');
-            if (it.status !== 'completed' && it.days !== null) meta.push('已 ' + it.days + ' 天');
-            meta.push(it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片');
+            const openDays = (it.status !== 'completed' && it.days !== null) ? '已 ' + it.days + ' 天' : '';
+            if (openDays) meta.push(openDays);
+            if (it.finish_at) meta.push('預估完成 ' + fmtMonthDay(it.finish_at));
             if (it.byNames.length) meta.push(it.byNames.join('、'));
             if (it.completed_by) meta.push('結案：' + it.completed_by);
-            const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`;
+            const short = [openDays, it.finish_at ? '預估 ' + fmtMonthDay(it.finish_at) : '']
+                .filter(Boolean).join(' · ');
             // 費用（掛在工項上；同一工項每筆 log 的費用一樣，取最後一筆）
             const last = it.logs && it.logs[it.logs.length - 1];
             const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.estimate_currency, last.final_currency) : '';
@@ -2064,7 +2079,7 @@
                 <div class="item-head" data-item-head>
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
                     <span class="it-title">${esc(it.title)}</span>
-                    ${flagAttention ? '<span class="flag-warn">⚠️ 需注意</span>' : ''}
+                    ${flagAttention ? '<span class="flag-warn">⚠️ 需業主注意</span>' : ''}
                     ${it.status !== '_loose'
                         ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`
                         : ''}
@@ -2122,9 +2137,7 @@
 
         function sheetHtml(it) {
             const meta = [
-                it.opening ? fmtMonthDay(it.opening) + ' 開案' : '',
                 it.days !== null && it.status !== 'completed' ? '已 ' + it.days + ' 天' : '',
-                it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片',
                 it.byNames.length ? it.byNames.join('、') : '',
                 it.completed_by ? '結案：' + it.completed_by : '',
             ].filter(Boolean).join(' · ');
@@ -2284,7 +2297,7 @@
             </div>`;
         }
 
-        // ---------- 費用比較（預估費用 vs 實際工程款的對比文件）----------
+        // ---------- 費用分析（預估費用 vs 實際工程款的對比文件）----------
         function costCompareBlock(it) {
             if (it.status === '_loose' || !HAS_COST_COMPARE) return '';
             const cs = it.cost_compare || [];
@@ -2292,14 +2305,14 @@
                 ? `<div class="quote-list">${cs.map((q, idx) => `
                     <div class="quote-row">
                         ${quoteThumb(q)}
-                        <a href="${esc(q.url || '')}" target="_blank" rel="noopener" class="quote-name">${esc(q.name || ('費用比較 ' + (idx + 1)))}</a>
+                        <a href="${esc(q.url || '')}" target="_blank" rel="noopener" class="quote-name">${esc(q.name || ('費用分析 ' + (idx + 1)))}</a>
                         <button type="button" class="ghost small" data-cc-del="${esc(it.itemId)}" data-cc-url="${esc(q.url || '')}">刪除</button>
                     </div>`).join('')}</div>`
-                : '<div class="hint">尚無費用比較檔案。</div>';
+                : '<div class="hint">尚無費用分析檔案。</div>';
             return `<div class="quote-block">
-                <div class="quote-head">📊 費用比較（預估 vs 實際工程款）</div>
+                <div class="quote-head">📊 費用分析</div>
                 ${list}
-                <label class="quote-add">＋ 上傳費用比較檔案
+                <label class="quote-add">＋ 上傳費用分析檔案
                     <input type="file" multiple data-cc-file="${esc(it.itemId)}" style="display:none">
                 </label>
             </div>`;
@@ -2467,6 +2480,9 @@
                 <div class="status-row">
                     <label class="sb-fld">進度
                         <select data-sheet-status="${esc(it.itemId)}">${opts}</select></label>
+                    ${HAS_FINISH_AT ? `
+                    <label class="sb-fld">預估完成時間
+                        <input type="date" data-sheet-finish="${esc(it.itemId)}" value="${esc(it.finish_at || '')}"></label>` : ''}
                     ${HAS_CURRENCY ? `
                     <label class="sb-chk"><input type="checkbox" data-flag="verified" data-flag-item="${esc(it.itemId)}"${it.verified ? ' checked' : ''}>已核對</label>
                     <label class="sb-fld">核對人
@@ -2475,7 +2491,7 @@
                     <label class="sb-fld">結案執行者
                         <input type="text" class="verify-name" data-completed-by="${esc(it.itemId)}" value="${esc(it.completed_by || '')}" placeholder="填名字"></label>` : ''}
                     ${HAS_CURRENCY ? `
-                    <label class="sb-chk"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需注意</label>` : ''}
+                    <label class="sb-chk"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需業主注意</label>` : ''}
                     <span class="sb-hint">「開案 / 進行中 / 暫停」都是未完成；選「已完成」整張卡就結案。</span>
                     ${(st === 'completed' && !it.maintenance) ? maintCreateBlock(it) : ''}
                 </div>
@@ -2508,10 +2524,6 @@
                     <label>付款資料（備註）<textarea data-pdf-note="${esc(it.itemId)}" rows="3" placeholder="點下方「掃描付款資料」自動帶入，可在此核對修改">${esc(it.pdf_note || '')}</textarea></label>
                     <button type="button" class="ghost small" data-scan-pay="${esc(it.itemId)}">🔍 掃描付款資料</button>
                 </div>` : ''}
-                <div class="pdf-link">
-                    <button type="button" class="ghost small" data-regen-pdf="${esc(it.itemId)}">產生付款摘要 PDF</button>
-                    ${it.need_attention_pdf ? `<a href="${esc(it.need_attention_pdf)}" target="_blank" rel="noopener">📄 付款摘要 PDF</a><button type="button" class="danger small" data-del-pdf="${esc(it.itemId)}">刪除</button>` : ''}
-                </div>
             </div>`;
         }
 
@@ -2522,12 +2534,22 @@
             const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.estimate_currency, last.final_currency) : '';
             return `<div class="cost-block">
                 <div class="cost-head">💰 費用</div>
-                <div class="money">${cost || '尚未填費用'}</div>
+                ${cost ? `<div class="money">${cost}</div>` : ''}
                 ${costEditHtml(it)}
                 ${quoteBlock(it)}
+                ${pdfRow(it)}
                 ${costCompareBlock(it)}
                 ${procurementToggle(it)}
                 ${payBlock(it)}
+            </div>`;
+        }
+
+        // 付款摘要 PDF：內容來自上傳的報價單／付款資料 → 按鈕放在報價單下面
+        function pdfRow(it) {
+            if (!HAS_CURRENCY) return '';
+            return `<div class="pdf-link">
+                <button type="button" class="ghost small" data-regen-pdf="${esc(it.itemId)}">產生付款摘要 PDF</button>
+                ${it.need_attention_pdf ? `<a href="${esc(it.need_attention_pdf)}" target="_blank" rel="noopener">📄 付款摘要 PDF</a><button type="button" class="danger small" data-del-pdf="${esc(it.itemId)}">刪除</button>` : ''}
             </div>`;
         }
 
@@ -2887,6 +2909,21 @@
             }
         }
 
+        // 浮層最上面的「預估完成時間」→ 直接寫進度卡（items.end_date）
+        async function setSheetFinish(itemId, value) {
+            const val = String(value || '').trim() || null;
+            try {
+                const { error } = await supabase.from('items')
+                    .update({ end_date: val }).eq('id', itemId).select('id');
+                if (error) throw error;
+                say('listMsg', val ? `預估完成時間已設為 ${val}` : '已清掉預估完成時間', 'ok');
+                await loadEntries();
+            } catch (err) {
+                say('listMsg', '預估完成時間儲存失敗：' + err.message, 'error');
+                await loadEntries();
+            }
+        }
+
         // 浮層「已完成」時出現的「長期維修」→ 建立一張維修工項
         async function createSheetMaintenance(itemId) {
             const it = findBoardItem(itemId);
@@ -2998,6 +3035,10 @@
             // 浮層最上面的「進度」→ 直接改進度卡狀態
             box.querySelectorAll('[data-sheet-status]').forEach(sel => {
                 sel.onchange = () => setSheetStatus(sel.getAttribute('data-sheet-status'), sel.value);
+            });
+            // 浮層最上面的「預估完成時間」→ 直接寫進度卡
+            box.querySelectorAll('[data-sheet-finish]').forEach(inp => {
+                inp.onchange = () => setSheetFinish(inp.getAttribute('data-sheet-finish'), inp.value);
             });
             // 「完工後有長期維修需求」→ 展開名稱／日期／建立按鈕
             const maintOn = box.querySelector('#sheet-maint-on');

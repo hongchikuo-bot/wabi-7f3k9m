@@ -133,6 +133,7 @@ function buildTree(logs) {
             payment_account: last.payment_account || null,
             payment_amount: last.payment_amount || null,
             pdf_note: last.pdf_note || null,
+            finish_at: last.finish_at || null,
         });
     }
     for (const g of groups) {
