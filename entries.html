@@ -2183,14 +2183,18 @@
         async function ensureEditStruct(it) {
             const src = it && it.logs && it.logs[0] && it.logs[0].src;
             const pid = src && src.project_id;
+            window.__dbg = { hasIt: !!it, nLogs: it && it.logs && it.logs.length, hasSrc: !!src, pid: pid || null, editStruct: editStruct ? Object.keys(editStruct) : null };
             if (!pid) return;
             if (editStruct && editStruct.projectId === pid) return;
             try {
                 const s = await fetchStructure(pid);
+                window.__dbg.nodes = s.nodes ? s.nodes.length : -1;
+                window.__dbg.items = s.items ? s.items.length : -1;
                 s.projectId = pid;
                 editStruct = s;
                 if (OPEN_ITEM) refreshSheet();
             } catch (err) {
+                window.__dbg.err = err.message;
                 say('listMsg', '讀取該專案的節點／項目失敗，地點與項目下拉會是空的：' + err.message, 'error');
             }
         }
