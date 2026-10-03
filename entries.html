@@ -453,6 +453,18 @@
             <div id="latestWrap" class="hidden">
                 <div id="latestPanel"></div>
                 <div class="hint" id="modeHint"></div>
+                <!-- 已經有一張同名卡時才出現：這筆要接續那張，還是另開一張新卡 -->
+                <div id="newCaseWrap" style="display:none;margin-top:10px;padding:8px 10px;border:1px dashed var(--color-line);border-radius:6px;background:#fffdf7">
+                    <label class="check-line">
+                        <input type="checkbox" id="new_case">
+                        <span>這筆是<strong>不同案件</strong> → 另開一張新卡，不要併進上面那張</span>
+                    </label>
+                    <div id="newCaseNameWrap" style="display:none;margin-top:8px">
+                        <label>新卡名稱</label>
+                        <input type="text" id="new_case_name"
+                               placeholder="例：搬運-淨空廚房（留空＝用上面的工項名）">
+                    </div>
+                </div>
             </div>
 
             <div class="form-group" id="completeWrap" style="display:none">
@@ -872,6 +884,7 @@
         }
 
         let CURRENT_ITEM_ID = null;
+        let PAIR_KEY = '';          // 目前選的「地點｜工項」，換了才重設「另開新卡」
 
         // 地點或工項一改變 → 重新對應到既有的進度卡（也可能還不存在），更新「最新紀錄」面板
         async function refreshPair() {
@@ -879,17 +892,44 @@
             const wt = $('work_type') ? $('work_type').value.trim() : '';
             const found = itemForPair(nodeId, wt);
             CURRENT_ITEM_ID = found ? found.id : null;
+            // 換了地點或工項 → 重設「另開新卡」的勾選（不要沿用上一個工項的選擇）
+            const key = nodeId + '||' + normWT(wt);
+            if (key !== PAIR_KEY) {
+                PAIR_KEY = key;
+                if ($('new_case')) $('new_case').checked = false;
+                if ($('new_case_name')) $('new_case_name').value = '';
+            }
+            syncNewCase();
             syncCompleteCheckbox();
             await loadLatestLogForItem(CURRENT_ITEM_ID, wt, nodeId);
             refreshFormTodos();     // 待辦清單跟著換工項
         }
 
+        // 「另開新卡」只在「已經有一張同名卡」時才有意義（沒卡的話本來就是建新卡）
+        function syncNewCase() {
+            const wrap = $('newCaseWrap');
+            if (!wrap) return;
+            const hasCard = !!CURRENT_ITEM_ID;
+            wrap.style.display = hasCard ? 'block' : 'none';
+            if (!hasCard && $('new_case')) $('new_case').checked = false;
+            const on = hasCard && $('new_case') && $('new_case').checked;
+            const nameWrap = $('newCaseNameWrap');
+            if (nameWrap) nameWrap.style.display = on ? 'block' : 'none';
+        }
+
         // 找或建立 (地點 × 工項) 的進度卡，回傳 items 那一列
-        async function ensureItemFor(projectId, nodeId, workType) {
+        // opts.forceNew=true → 不沿用既有卡，強制開一張新的（不同案件）
+        // opts.newTitle   → 新卡要叫什麼（留空＝用工項名，撞名再加編號）
+        async function ensureItemFor(projectId, nodeId, workType, opts) {
             const wt = String(workType || '').trim();
             if (!wt) return null;
-            const hit = itemForPair(nodeId, wt);
-            if (hit) return hit;
+            const forceNew = !!(opts && opts.forceNew);
+            const wantTitle = String((opts && opts.newTitle) || '').trim();
+
+            if (!forceNew) {
+                const hit = itemForPair(nodeId, wt);
+                if (hit) return hit;
+            }
 
             const key = normWT(wt);
             const fetchPairRows = async () => {
@@ -900,23 +940,31 @@
                 if (error) throw new Error('查詢工項失敗：' + error.message);
                 return data || [];
             };
-            const found = (await fetchPairRows()).find(i => normWT(workTypeOf(i)) === key);
-            if (found) { ITEMS_BY_ID.set(found.id, found); return found; }
+            if (!forceNew) {
+                const found = (await fetchPairRows()).find(i => normWT(workTypeOf(i)) === key);
+                if (found) { ITEMS_BY_ID.set(found.id, found); return found; }
+            }
 
-            const { data: created, error: cErr } = await supabase.from('items')
-                .insert([{ project_id: projectId, node_id: nodeId, title: wt, work_type: wt, status: null }])
-                .select().single();
-            if (cErr) {
-                // 23505 = 唯一限制（例如 UNIQUE(node_id, title)）→ 可能另一邊剛好建好了，再查一次
+            // 建立新卡。名稱＝指定的新卡名（沒指定就用工項名）；
+            // 撞到 UNIQUE(node_id, title)（23505）就加「 (2)、(3)…」再試。
+            const baseTitle = wantTitle || wt;
+            let title = baseTitle;
+            for (let attempt = 0; attempt < 50; attempt++) {
+                const { data: created, error: cErr } = await supabase.from('items')
+                    .insert([{ project_id: projectId, node_id: nodeId, title, work_type: wt, status: null }])
+                    .select().single();
+                if (!cErr) {
+                    ITEMS_BY_ID.set(created.id, created);
+                    if (!WORK_TYPES.some(v => normWT(v) === key)) WORK_TYPES.push(wt);
+                    return created;
+                }
                 if (cErr.code === '23505') {
-                    const again = (await fetchPairRows()).find(i => normWT(workTypeOf(i)) === key);
-                    if (again) { ITEMS_BY_ID.set(again.id, again); return again; }
+                    title = baseTitle + ' (' + (attempt + 2) + ')';
+                    continue;
                 }
                 throw new Error('建立工項進度卡失敗：' + cErr.message);
             }
-            ITEMS_BY_ID.set(created.id, created);
-            if (!WORK_TYPES.some(v => normWT(v) === key)) WORK_TYPES.push(wt);
-            return created;
+            throw new Error('建立工項進度卡失敗：名稱一直重複，請換一個新卡名稱');
         }
 
         // 長期維修：建立一個「獨立維修工項」（items 一列，maintenance=true）。
@@ -1394,7 +1442,10 @@
             let itemRow = null;
             if (workType) {
                 try {
-                    itemRow = await ensureItemFor(projectId, nodeId, workType);
+                    itemRow = await ensureItemFor(projectId, nodeId, workType, {
+                        forceNew: !!($('new_case') && $('new_case').checked),
+                        newTitle: $('new_case_name') ? $('new_case_name').value.trim() : ''
+                    });
                 } catch (err) {
                     $('submitBtn').disabled = false;
                     return say('formMsg', err.message);
@@ -1568,6 +1619,10 @@
             if ($('newTodoText')) $('newTodoText').value = '';
             refreshFormTodos();
             if ($('mark_complete')) $('mark_complete').checked = false;
+            if ($('new_case')) $('new_case').checked = false;
+            if ($('new_case_name')) $('new_case_name').value = '';
+            PAIR_KEY = '';            // 下一次 refreshPair 一定重設「另開新卡」
+            syncNewCase();
             syncCompleteCheckbox();
             $('photos').innerHTML = '';
             pendingFiles = [];
@@ -3540,6 +3595,8 @@
         // 勾「已完成」→ 跳出「長期維修」選項；勾「長期維修」→ 跳出日期欄
         $('mark_complete').addEventListener('change', () => syncMaintenance());
         $('mark_maintenance').addEventListener('change', () => syncMaintenance());
+        // 勾「另開新卡」→ 跳出新卡名稱欄
+        if ($('new_case')) $('new_case').addEventListener('change', () => syncNewCase());
         // 地點或工項改變 → 重新對應到那張進度卡（顯示目前狀態與最新紀錄）
         $('node_id').addEventListener('change', () => refreshPair());
         $('workTypePick').addEventListener('change', () => {
