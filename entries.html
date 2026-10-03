@@ -2174,6 +2174,25 @@
             const sheet = $('sheet');
             if (sheet) sheet.classList.add('open');
             bindEntryActions(box);
+            ensureEditStruct(it);   // 背景把「地點／工項」清單載好，好了再重繪一次
+        }
+
+        // 紀錄表單的「地點／工項」下拉需要該專案的結構。
+        // ⚠️ 一進浮層就自動展開最新那筆，所以在這裡一定要把結構載好 ——
+        //    不然下拉是空的，一按「儲存」會把紀錄的地點／工項清掉（資料會壞掉）。
+        async function ensureEditStruct(it) {
+            const src = it && it.logs && it.logs[0] && it.logs[0].src;
+            const pid = src && src.project_id;
+            if (!pid) return;
+            if (editStruct && editStruct.projectId === pid) return;
+            try {
+                const s = await fetchStructure(pid);
+                s.projectId = pid;
+                editStruct = s;
+                if (OPEN_ITEM) refreshSheet();
+            } catch (err) {
+                say('listMsg', '讀取該專案的節點／項目失敗，地點與項目下拉會是空的：' + err.message, 'error');
+            }
         }
 
         // ---------- 費用編輯（在工項浮層裡就地改，不跳去後台）----------
@@ -3305,6 +3324,7 @@
             savingEdit = false;
             try {
                 editStruct = await fetchStructure(e.project_id);
+                editStruct.projectId = e.project_id;
             } catch (err) {
                 say('listMsg', '讀取該專案的節點／項目失敗，地點與項目下拉會是空的：' + err.message, 'error');
             }
@@ -3323,6 +3343,13 @@
             const wt = $('ee-worktype') ? $('ee-worktype').value.trim() : '';
             const saveBtn = $('entries') && $('entries').querySelector
                 ? $('entries').querySelector('[data-save-edit]') : null;
+
+            // ⚠️ 保命：原本有工項，但表單是空的（結構還沒載入／載入失敗）
+            //    → 不要靜默把這筆紀錄從它的進度卡上拆掉
+            if (!wt && e.item_id && !editStruct) {
+                return say('listMsg',
+                    '地點／工項清單還沒載入完成，先不要儲存（重新整理頁面再試一次）。', 'error');
+            }
 
             // 工項 → 對應到「該地點 × 該工項」的進度卡（沒有就建一張）
             let itemId = null;
