@@ -1957,7 +1957,8 @@
             const open = list.filter(t => !t.done);
             const done = list.filter(t => t.done);
             const body = open.map(todoRowHtml).join('');
-            return (body || (done.length ? '' : '<div class="hint">目前沒有待辦。</div>'))
+            // 沒有待辦就什麼都不畫（以前會多一行灰字「目前沒有待辦。」，kk 說不用）
+            return body
                 + (done.length
                     ? `<div class="todos-done-head">已完成 ${done.length} 項</div>` + done.map(todoRowHtml).join('')
                     : '');
@@ -1965,10 +1966,12 @@
 
         function todoBlock(it) {
             if (!HAS_TODOS || it.status === '_loose') return '';
-            // 不在這裡「新增待辦」—— 新增走下面紀錄表單的「待辦事項 / 下一步」，免得兩處重複
+            // 這張卡沒有待辦 → 整個區塊不用出現（待辦是從下面紀錄表單的「待辦事項 / 下一步」長出來的）
+            const html = todoListHtml(it.itemId);
+            if (!html) return '';
             return `<div class="todos">
                 <div class="todos-head">待辦事項</div>
-                ${todoListHtml(it.itemId)}
+                ${html}
             </div>`;
         }
 
@@ -1986,9 +1989,15 @@
                 return;
             }
             const pending = todoLines($('resolution') ? $('resolution').value : '');
+            const cur = CURRENT_ITEM_ID ? todoListHtml(CURRENT_ITEM_ID) : '';
+            // 沒有既有待辦、這次也沒新增任何一行 → 整區不顯示（不留空框、不留灰字）
+            const head = !CURRENT_ITEM_ID
+                ? '這個工項還沒建立（送出時一起建立）'
+                : (cur ? '這個工項目前的待辦' : '');
+            if (!head && !pending.length) { box.innerHTML = ''; return; }
             box.innerHTML = `<div class="todos">
-                <div class="todos-head">${CURRENT_ITEM_ID ? '這個工項目前的待辦' : '這個工項還沒建立（送出時一起建立）'}</div>
-                ${CURRENT_ITEM_ID ? todoListHtml(CURRENT_ITEM_ID) : ''}
+                ${head ? `<div class="todos-head">${head}</div>` : ''}
+                ${cur}
                 ${pending.length
                     ? `<div class="todos-done-head">這次要新增 ${pending.length} 項</div>`
                       + pending.map((x, i) => `<div class="todo-row pending">
