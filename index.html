@@ -734,19 +734,25 @@
         }
 
         function itemRow(it) {
+            // 卡片摘要（kk 2026-10-12）：只留「已 N 天 · 預估完成 · 紀錄人 · 結案」
+            // 不再顯示開案日期、幾筆紀錄、幾張照片
             const meta = [];
-            if (it.opening) meta.push(fmtMonthDay(it.opening) + ' 開案');
-            if (it.status !== 'completed' && it.days !== null) meta.push('已 ' + it.days + ' 天');
             const openTodos = (it.todos || []).filter(t => !t.done);
+            const openDays = (it.status !== 'completed' && it.days !== null) ? '已 ' + it.days + ' 天' : '';
+            const finish = it.finish_at ? '預估完成 ' + fmtMonthDay(it.finish_at) : '';
+            if (openDays) meta.push(openDays);
+            if (finish) meta.push(finish);
             if (openTodos.length) meta.push('待辦 ' + openTodos.length + ' 項');
-            meta.push(it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片');
             if (it.byNames.length) meta.push(it.byNames.join('、'));
             if (it.completed_by) meta.push('結案：' + it.completed_by);
             if ((it.quotes || []).length) meta.push('報價單 ' + it.quotes.length + ' 份');
             // 窄螢幕（欄位 ~90px）用短版摘要，不然整段文字會折成一團
-            const short = `${fmtMonthDay(it.opening)} · ${it.logs.length}筆/${it.shots}張`
-                + (openTodos.length ? ` · 待辦${openTodos.length}` : '')
-                + ((it.quotes || []).length ? ` · 報價${it.quotes.length}` : '');
+            const short = [
+                openDays,
+                it.finish_at ? '預估 ' + fmtMonthDay(it.finish_at) : '',
+                openTodos.length ? '待辦' + openTodos.length : '',
+                (it.quotes || []).length ? '報價' + (it.quotes || []).length : '',
+            ].filter(Boolean).join(' · ');
             return `<div class="item-row${it.need_attention && !it.payment_done ? ' need-attention' : ''}" data-item="${esc(it.itemId)}" onclick="toggleItem(this)">
                 <div class="item-head">
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
@@ -832,8 +838,8 @@
             if (!found || !box) return;
             const { grp, it } = found;
             const meta = [
-                it.opening ? fmtMonthDay(it.opening) + ' 開案' : '',
-                it.logs.length + ' 筆紀錄 · ' + it.shots + ' 張照片',
+                it.status !== 'completed' && it.days !== null ? '已 ' + it.days + ' 天' : '',
+                it.finish_at ? '預估完成 ' + fmtMonthDay(it.finish_at) : '',
                 it.byNames.join('、'),
                 it.completed_by ? '結案：' + it.completed_by : '',
             ].filter(Boolean).join(' · ');
