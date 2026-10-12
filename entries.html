@@ -3221,7 +3221,10 @@
                 const inp = box.querySelector('#ee-worktype');
                 if (inp && wtPick.value) inp.value = wtPick.value;
             };
-            if (editingEntryId) bindEditPhotoUI(box);
+            // ⚠️ 一進浮層就會把「最新那筆」自動攤開成表單（這時 editingEntryId 還是 null），
+            //    所以不能在 editingEntryId 有值時才綁 —— 否則「🖼 從相簿選／📷 拍照」按鈕
+            //    在自動展開的那筆上完全沒反應（2026-10-12 實測發現的 bug）。
+            bindEditPhotoUI(box);
         }
 
         // 編輯表單：地點與工項用下拉（跟新增時同一套選項，避免打字不一致）
