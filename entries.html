@@ -383,6 +383,17 @@
         .file-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
         .file-row img { width: 64px; height: 48px; object-fit: cover; border-radius: 4px; flex: none; background: #eee; }
         .file-row input[type=text] { flex: 1; }
+        /* 非圖片檔（PDF / Office）的圖示與檔名 */
+        .file-ic {
+            width: 64px; height: 48px; flex: none; border-radius: 4px; background: #f0ece4;
+            display: flex; align-items: center; justify-content: center; font-size: 22px;
+        }
+        .f-name { flex: none; font-size: 11px; color: var(--color-muted); line-height: 1.3;
+                  max-width: 170px; word-break: break-all; }
+        .photo-item .file-ic { width: auto; height: 72px; font-size: 34px; }
+        .photo-item.file-item { width: 172px; }
+        .photo-item .file-open { display: block; text-align: center; font-size: 11px; margin: 4px 0;
+                                 color: var(--color-accent); text-decoration: underline; }
         .progress { font-size: 12px; color: var(--color-accent); margin-top: 6px; }
     </style>
 </head>
@@ -539,7 +550,7 @@
                 <div id="dropZone" class="drop-zone">
                     <span class="big">🖼 從相簿選（可多選）</span>
                     <span class="sub">點這裡選檔，電腦上也可以把圖片拖進來</span>
-                    <input type="file" id="photoFiles" accept="image/*" multiple class="hidden">
+                    <input type="file" id="photoFiles" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple class="hidden">
                 </div>
                 <div id="photoPreview"></div>
                 <div id="uploadProgress" class="progress"></div>
@@ -1037,29 +1048,75 @@
             if (!markMaint.checked) $('next_maintenance_at').value = '';
         }
 
-        // ---------- 照片：檔案（拍照 / 選檔 / 拖放）----------
+        // ---------- 照片與附件：檔案（拍照 / 選檔 / 拖放）----------
         const PHOTO_BUCKET = 'log-photos';
         let pendingFiles = [];   // [{ file, desc }]
+
+        // kk 2026-10-12：不再只收照片 —— 也收 PDF 與 Office 文件，單檔上限 25MB
+        const MAX_FILE_MB = 25;
+        const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
+        const FILE_ACCEPT = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx';
+        const IMG_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'avif', 'tif'];
+        const DOC_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+
+        // 副檔名：檔名或網址都吃（會先去掉 ?query）。⚠️ 全站只有這一個 extOf，
+        // 用 function 宣告（會提升），下面的付款摘要程式碼在更後面也用它
+        function extOf(name) {
+            const m = String(name || '').toLowerCase().split('?')[0].match(/\.([a-z0-9]+)$/);
+            return m ? m[1].slice(0, 5) : '';
+        }
+
+        function isImageFile(f) {
+            if (/^image\//.test((f && f.type) || '')) return true;
+            return IMG_EXT.includes(extOf(f && f.name));
+        }
+
+        // 允許上傳：圖片 ＋ PDF ＋ Office 文件
+        function fileAllowed(f) {
+            return isImageFile(f) || DOC_EXT.includes(extOf(f && f.name));
+        }
+
+        // 已經存在資料庫裡的：看網址副檔名判斷。沒有副檔名／不認識的一律當圖片（沿用舊行為，
+        // 不會把以前的照片變成檔案列）
+        function isImageUrl(url) {
+            const m = String(url || '').split('?')[0].match(/\.([a-z0-9]{2,5})$/i);
+            if (!m) return true;
+            const e = m[1].toLowerCase();
+            if (IMG_EXT.includes(e)) return true;
+            return !DOC_EXT.includes(e);
+        }
+
+        function urlFileLabel(url) {
+            const raw = String(url || '').split('?')[0].split('/').pop() || '';
+            try { return decodeURIComponent(raw) || '附件'; } catch (err) { return raw || '附件'; }
+        }
+
+        // ⚠️ Storage 不接受中文檔名（會回 InvalidKey），所以**原始檔名存進 photo_description**
+        function fileDisplayName(p) {
+            return (p && p.photo_description) || urlFileLabel(p && p.photo_url);
+        }
 
         function renderFilePreviews() {
             const box = $('photoPreview');
             box.innerHTML = '';
             pendingFiles.forEach((item, i) => {
+                const img = isImageFile(item.file);
                 const div = document.createElement('div');
                 div.className = 'file-row';
-                const thumb = URL.createObjectURL(item.file);
+                const thumb = img ? URL.createObjectURL(item.file) : '';
                 div.innerHTML = `
-                    <img src="${thumb}" alt="">
-                    <input type="text" class="f-desc" placeholder="照片描述（選填）">
+                    ${img ? `<img src="${thumb}" alt="">` : '<div class="file-ic">📄</div>'}
+                    <input type="text" class="f-desc" placeholder="${img ? '照片描述（選填）' : '檔名（可改）'}">
+                    ${img ? '' : `<div class="f-name">${esc(item.file.name || '')}<br>${fmtSize(item.file.size)}</div>`}
                     <button type="button" class="ghost small rm">刪除</button>`;
                 const descInput = div.querySelector('.f-desc');
                 descInput.value = item.desc || '';
                 descInput.oninput = e => { pendingFiles[i].desc = e.target.value; };
                 div.querySelector('.rm').onclick = () => {
-                    URL.revokeObjectURL(thumb);
+                    if (thumb) URL.revokeObjectURL(thumb);
                     pendingFiles.splice(i, 1);
                     renderFilePreviews();
-                    $('uploadProgress').textContent = pendingFiles.length ? `已選 ${pendingFiles.length} 張照片` : '';
+                    $('uploadProgress').textContent = pendingFiles.length ? `已選 ${pendingFiles.length} 個檔案` : '';
                 };
                 box.appendChild(div);
             });
@@ -1067,17 +1124,17 @@
 
         function addFiles(fileList) {
             let added = 0;
+            const bad = [];
             for (const f of fileList) {
-                if (!String(f.type || '').startsWith('image/')) continue;
-                pendingFiles.push({ file: f, desc: '' });
+                if (!fileAllowed(f)) { bad.push(`${f.name}（只收圖片／PDF／Office）`); continue; }
+                if (f.size > MAX_FILE_BYTES) { bad.push(`${f.name}（${fmtSize(f.size)} 超過 ${MAX_FILE_MB}MB）`); continue; }
+                // 非圖片：預設把原始檔名填進描述欄（送出後會存成它的顯示名稱）
+                pendingFiles.push({ file: f, desc: isImageFile(f) ? '' : (f.name || '') });
                 added++;
             }
             renderFilePreviews();
-            if (added) {
-                $('uploadProgress').textContent = `已選 ${pendingFiles.length} 張照片`;
-            } else if (fileList.length) {
-                say('formMsg', '只能上傳圖片檔', 'error');
-            }
+            if (pendingFiles.length) $('uploadProgress').textContent = `已選 ${pendingFiles.length} 個檔案`;
+            if (bad.length) say('formMsg', '以下沒加入：' + bad.join('、'), 'error');
         }
 
         // ---------- 上傳前壓縮（紀錄用不需要原檔；手機照片動輒 3~8MB）----------
@@ -1147,25 +1204,32 @@
         }
 
         // 共用的上傳器：list = [{ file, desc }]，回傳可直接寫入 log_photos 的列
+        // 圖片 → 壓縮後上傳；PDF／Office → 原檔上傳（不壓縮），原始檔名存進 photo_description
         async function uploadFileList(list, projectId, onProgress) {
             const rows = [];
             let done = 0, savedBytes = 0, savedCount = 0;
             for (const item of list) {
-                const up = await shrinkImage(item.file);
-                if (up !== item.file && up.size < item.file.size) {
+                const img = isImageFile(item.file);
+                if (item.file.size > MAX_FILE_BYTES) {
+                    throw new Error(`（${item.file.name}）檔案 ${fmtSize(item.file.size)} 超過 ${MAX_FILE_MB}MB 上限`);
+                }
+                const up = img ? await shrinkImage(item.file) : item.file;
+                if (img && up !== item.file && up.size < item.file.size) {
                     savedBytes += item.file.size - up.size;
                     savedCount++;
                 }
-                const ext = (up.name.split('.').pop() || 'jpg').toLowerCase().slice(0, 5);
+                const ext = extOf(up.name) || (img ? 'jpg' : 'bin');
                 const path = `${projectId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
                 const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, up, {
                     cacheControl: '31536000',
                     upsert: false,
-                    contentType: up.type || 'image/jpeg'
+                    contentType: up.type || (img ? 'image/jpeg' : 'application/octet-stream')
                 });
                 if (error) throw new Error(`（${item.file.name}）${error.message}`);
                 const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-                rows.push({ photo_url: data.publicUrl, photo_description: item.desc || null });
+                // 非圖片：把原始檔名存起來（Storage 不能放中文檔名）
+                const desc = img ? (item.desc || null) : (item.desc || item.file.name || null);
+                rows.push({ photo_url: data.publicUrl, photo_description: desc });
                 done++;
                 if (onProgress) onProgress(done, list.length);
             }
@@ -1612,7 +1676,12 @@
             const pair = workType ? `（${where ? where + ' · ' : ''}${workType}）` : '';
 
             $('submitBtn').disabled = false;
-            say('formMsg', `✅ 已新增 1 筆紀錄${photos.length ? ` 與 ${photos.length} 張照片` : ''}${SHRINK_NOTE}${todoNote}${maintNote}${pair}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
+            const imgN = photos.filter(p => isImageUrl(p.photo_url)).length;
+            const fileN = photos.length - imgN;
+            const attNote = photos.length
+                ? ' 與 ' + [imgN ? `${imgN} 張照片` : '', fileN ? `${fileN} 個檔案` : ''].filter(Boolean).join('＋')
+                : '';
+            say('formMsg', `✅ 已新增 1 筆紀錄${attNote}${SHRINK_NOTE}${todoNote}${maintNote}${pair}${extra}。公開頁面重新整理即可看到。`, hadErr ? 'error' : 'ok');
             clearForm();
             setFormOpen(false);   // 收起來，回到看板（成功訊息留在標題上方）
             await loadEntries();
@@ -1927,8 +1996,16 @@
                           title="點一下看大圖"><img class="rec-thumb" src="${esc(photo.photo_url)}" alt=""
                           loading="lazy" onerror="this.style.visibility='hidden'"></a>`
                     : ''}
-                ${(e.log_photos && e.log_photos.length > 1)
-                    ? `<div class="rec-shot-count">共 ${e.log_photos.length} 張照片</div>` : ''}`}
+                ${(() => {
+                    const ps = e.log_photos || [];
+                    const imgs = ps.filter(p => isImageUrl(p.photo_url)).length;
+                    const files = ps.length - imgs;
+                    if (!files && imgs < 2) return '';
+                    const parts = [];
+                    if (imgs) parts.push(imgs + ' 張照片');
+                    if (files) parts.push(files + ' 個檔案');
+                    return '<div class="rec-shot-count">共 ' + parts.join(' ＋ ') + '</div>';
+                })()}`}
                 ${isOpen ? renderEditForm(e) : ''}
                 <div class="rec-actions">
                     ${isOpen ? '' : `<button class="ghost small" data-edit="${esc(e.id)}">編輯</button>`}
@@ -2683,10 +2760,7 @@
         }
 
         // ---------- 讀取「付款資料」檔案內容（電子檔讀文字、圖片附原圖）----------
-        const extOf = url => {
-            const m = String(url || '').toLowerCase().match(/\.([a-z0-9]+)(?:\?|$)/);
-            return m ? m[1] : '';
-        };
+        // （副檔名工具 extOf 已在上方統一宣告，這裡不要重複宣告）
         const isImgExt = ext => ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].includes(ext);
 
         // 圖片 → data URL（要 CORS；storage 公開圖有跨域許可）
@@ -3170,7 +3244,16 @@
             const photos = (e.log_photos || []).slice()
                 .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
             const photoHtml = photos.length
-                ? `<div class="photo-grid" id="ee-photo-grid">${photos.map(p => `
+                ? `<div class="photo-grid" id="ee-photo-grid">${photos.map(p => !isImageUrl(p.photo_url) ? `
+                    <div class="photo-item file-item">
+                        <div class="file-ic">📄</div>
+                        <div class="pdesc">${esc(fileDisplayName(p))}</div>
+                        <a class="file-open" href="${esc(p.photo_url)}" target="_blank" rel="noopener">開啟／下載</a>
+                        <button class="danger small"
+                            data-del-photo="${esc(p.id)}"
+                            data-photo-log="${esc(e.id)}"
+                            data-photo-url="${esc(p.photo_url)}">刪除檔案</button>
+                    </div>` : `
                     <div class="photo-item">
                         <img src="${esc(p.photo_url)}" alt="" onerror="this.style.visibility='hidden'">
                         ${(HAS_RECORDER && p.recorder_name)
@@ -3183,7 +3266,7 @@
                             data-photo-log="${esc(e.id)}"
                             data-photo-url="${esc(p.photo_url)}">刪除照片</button>
                     </div>`).join('')}</div>`
-                : '<div class="hint">這筆沒有照片。</div>';
+                : '<div class="hint">這筆沒有照片或附件。</div>';
 
             const t = e.log_time ? String(e.log_time).slice(0, 5) : '';
             return `
@@ -3210,19 +3293,20 @@
 
                 <div class="hint">「進度」（開案 / 進行中 / 暫停 / 已完成）已經移到浮層最上面，這裡不用再選。</div>
 
-                <div class="sub-label">照片（${photos.length} 張）</div>
+                <div class="sub-label">照片與附件（${photos.length} 個）</div>
                 ${photoHtml}
 
-                <div class="sub-label">＋ 追加照片到這筆紀錄</div>
+                <div class="sub-label">＋ 追加照片或檔案到這筆紀錄</div>
                 <label class="ee-taken-label">這批照片的<strong>拍攝日期</strong></label>
                 <input type="date" id="ee-photo-date" value="${esc(e.log_date || '')}">
                 <div class="hint">預設＝這筆紀錄的日期（${esc(e.log_date || '')}）。
-                    補<strong>舊照片</strong>時改成拍攝當天 —— 系統會依拍攝日期把照片排到正確的位置。</div>
+                    補<strong>舊照片</strong>時改成拍攝當天 —— 系統會依拍攝日期把照片排到正確的位置。<br>
+                    PDF／Office 檔案不受這個日期影響（一律排在同一天的照片後面）。</div>
                 <div class="add-photo-bar">
                     <button type="button" class="ghost small" id="ee-pick-photos">🖼 從相簿選</button>
                     <button type="button" class="ghost small" id="ee-camera">📷 拍照（可連續）</button>
                 </div>
-                <input type="file" id="ee-photo-files" accept="image/*" multiple class="hidden">
+                <input type="file" id="ee-photo-files" accept="${FILE_ACCEPT}" multiple class="hidden">
                 <input type="file" id="ee-camera-files" accept="image/*" capture="environment" class="hidden">
                 <div id="ee-photo-preview"></div>
                 <div id="ee-photo-urls"></div>
@@ -3241,18 +3325,20 @@
             if (!box) return;
             box.innerHTML = '';
             EDIT_FILES.forEach((item, i) => {
+                const img = isImageFile(item.file);
                 const div = document.createElement('div');
                 div.className = 'ee-photo-row';
-                const thumb = URL.createObjectURL(item.file);
+                const thumb = img ? URL.createObjectURL(item.file) : '';
                 div.innerHTML = `
-                    <img src="${thumb}" alt="">
-                    <input type="text" class="p-desc" placeholder="照片描述（選填）">
+                    ${img ? `<img src="${thumb}" alt="">` : '<div class="file-ic">📄</div>'}
+                    <input type="text" class="p-desc" placeholder="${img ? '照片描述（選填）' : '檔名（可改）'}">
+                    ${img ? '' : `<div class="f-name">${esc(item.file.name || '')}<br>${fmtSize(item.file.size)}</div>`}
                     <button type="button" class="ghost rm">刪除</button>`;
                 const inp = div.querySelector('.p-desc');
                 inp.value = item.desc || '';
                 inp.oninput = ev => { EDIT_FILES[i].desc = ev.target.value; };
                 div.querySelector('.rm').onclick = () => {
-                    URL.revokeObjectURL(thumb);
+                    if (thumb) URL.revokeObjectURL(thumb);
                     EDIT_FILES.splice(i, 1);
                     renderEditPhotoPreview();
                 };
@@ -3287,6 +3373,20 @@
             }))
             .filter(p => p.photo_url);
 
+        // 編輯浮層的「追加檔案」：圖片／PDF／Office 都收，順便檢查大小
+        function addEditFiles(files) {
+            let added = 0;
+            const bad = [];
+            for (const f of files) {
+                if (!fileAllowed(f)) { bad.push(`${f.name}（只收圖片／PDF／Office）`); continue; }
+                if (f.size > MAX_FILE_BYTES) { bad.push(`${f.name}（${fmtSize(f.size)} 超過 ${MAX_FILE_MB}MB）`); continue; }
+                EDIT_FILES.push({ file: f, desc: isImageFile(f) ? '' : (f.name || '') });
+                added++;
+            }
+            if (bad.length) say('listMsg', '以下沒加入：' + bad.join('、'), 'error');
+            return added;
+        }
+
         // 每次重繪編輯表單都要重新接（HTML 是字串產生的）
         function bindEditPhotoUI(box) {
             const pick = box.querySelector('#ee-pick-photos');
@@ -3295,14 +3395,9 @@
                 pick.onclick = () => fileInput.click();
                 fileInput.onchange = ev => {
                     const files = [...(ev.target.files || [])];
-                    let added = 0;
-                    for (const f of files) {
-                        if (!String(f.type || '').startsWith('image/')) continue;
-                        EDIT_FILES.push({ file: f, desc: '' });
-                        added++;
-                    }
+                    const added = addEditFiles(files);
                     ev.target.value = '';   // 允許重選同一個檔案
-                    if (!added && files.length) say('listMsg', '只能上傳圖片檔', 'error');
+                    if (!added && !files.length) say('listMsg', '沒有選到檔案', 'error');
                     renderEditPhotoPreview();
                 };
             }
@@ -3313,14 +3408,9 @@
                 cam.onclick = () => camInput.click();
                 camInput.onchange = ev => {
                     const files = [...(ev.target.files || [])];
-                    let added = 0;
-                    for (const f of files) {
-                        if (!String(f.type || '').startsWith('image/')) continue;
-                        EDIT_FILES.push({ file: f, desc: '' });
-                        added++;
-                    }
+                    const added = addEditFiles(files);
                     ev.target.value = '';   // 允許再拍一張
-                    if (!added && files.length) say('listMsg', '只能上傳圖片檔', 'error');
+                    if (!added && !files.length) say('listMsg', '沒有選到檔案', 'error');
                     renderEditPhotoPreview();
                 };
             }

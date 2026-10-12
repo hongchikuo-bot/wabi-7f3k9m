@@ -349,6 +349,42 @@
             line-height: 1.35;
         }
 
+        /* 非圖片的附件（PDF／Office）：公開頁顯示成一列可下載的檔案 */
+        .shot-file {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            width: 240px;
+            padding: 0.6rem 0.7rem;
+            border: 1px solid var(--color-line);
+            border-radius: 6px;
+            background: #fff;
+            text-decoration: none;
+            color: var(--color-text);
+            transition: background 0.25s ease;
+        }
+
+        .shot-file:hover { background: #f4efe7; }
+
+        .shot-file-ic { font-size: 1.5rem; line-height: 1; flex: none; }
+
+        .shot-file-name {
+            flex: 1;
+            font-size: 0.76rem;
+            line-height: 1.35;
+            word-break: break-all;
+        }
+
+        .shot-file-dl {
+            flex: none;
+            font-size: 0.7rem;
+            color: var(--color-accent);
+            border: 1px solid currentColor;
+            border-radius: 3px;
+            padding: 0.05rem 0.35rem;
+        }
+
         .tag {
             position: absolute;
             top: 0.4rem;
@@ -563,7 +599,44 @@
             return uploadSeq(a) - uploadSeq(b);
         }
 
+        // ---------- 附件：紀錄除了照片，也能放 PDF / Office 檔（kk 2026-10-12）----------
+        const IMG_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'avif', 'tif'];
+        const DOC_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+
+        function isImageUrl(url) {
+            const m = String(url || '').split('?')[0].match(/\.([a-z0-9]{2,5})$/i);
+            if (!m) return true;                       // 沒有副檔名 → 當圖片（舊資料）
+            const e = m[1].toLowerCase();
+            return IMG_EXT.includes(e) ? true : !DOC_EXT.includes(e);
+        }
+
+        // 顯示名稱：非圖片的原始檔名存在 photo_description（Storage 不能放中文檔名）
+        function fileDisplayName(p) {
+            if (p && p.photo_description) return p.photo_description;
+            const raw = String((p && p.photo_url) || '').split('?')[0].split('/').pop() || '';
+            try { return decodeURIComponent(raw) || '附件'; } catch (err) { return raw || '附件'; }
+        }
+
+        function fileIcon(name) {
+            const e = String(name || '').split('.').pop().toLowerCase();
+            if (e === 'pdf') return '📕';
+            if (['doc', 'docx'].includes(e)) return '📘';
+            if (['xls', 'xlsx'].includes(e)) return '📗';
+            if (['ppt', 'pptx'].includes(e)) return '📙';
+            return '📄';
+        }
+
+        // 非圖片附件在公開頁顯示成一列可下載的檔案
+        function fileLink(p) {
+            const name = fileDisplayName(p);
+            return `<a class="shot-file" href="${esc(p.photo_url || '')}" target="_blank" rel="noopener">
+                <span class="shot-file-ic">${fileIcon(name)}</span>
+                <span class="shot-file-name">${esc(name)}</span>
+                <span class="shot-file-dl">下載</span></a>`;
+        }
+
         function shotFigure(ph, log) {
+            if (!isImageUrl(ph.photo_url)) return fileLink(ph);
             const cap = [ph.taken_at || log.log_date, ph.recorder_name || log.recorder_name,
                          ph.photo_description].filter(Boolean).join(' · ');
             return `<figure class="shot" onclick="showDetailById('${esc(log.id)}')">
@@ -581,7 +654,14 @@
                     <span class="rec-date">${esc(log.log_date) || '未標記日期'}</span>
                     ${st ? `<span class="chip ${STATUS_CLASS[st] || ''}">${esc(STATUS_LABEL[st] || '')}</span>` : ''}
                     ${log.recorder_name ? `<span class="rec-by">紀錄：${esc(log.recorder_name)}</span>` : ''}
-                    ${photos.length ? `<span class="rec-shots">${photos.length} 張照片</span>` : ''}
+                    ${(() => {
+                        const imgs = photos.filter(p => isImageUrl(p.photo_url)).length;
+                        const files = photos.length - imgs;
+                        const parts = [];
+                        if (imgs) parts.push(imgs + ' 張照片');
+                        if (files) parts.push(files + ' 個檔案');
+                        return parts.length ? `<span class="rec-shots">${parts.join(' ＋ ')}</span>` : '';
+                    })()}
                 </div>
                 ${log.main_description ? `<div class="rec-desc">${esc(log.main_description)}</div>` : ''}
                 ${log.issues_found ? `<div class="rec-issues">⚠️ 發現問題：${esc(log.issues_found)}</div>` : ''}
@@ -795,6 +875,10 @@
             // 每張標明是誰上傳的（補拍可以讓別人加到同一筆紀錄）
             const photos = (log.photos && log.photos.length) ? log.photos : [{}];
             modalShots.innerHTML = photos.map(ph => {
+                // 非圖片（PDF／Office）→ 顯示成一列可下載的檔案，不做大圖
+                if (!isImageUrl(ph.photo_url)) {
+                    return `<div class="modal-shot modal-file">${fileLink(ph)}</div>`;
+                }
                 // 日期優先用照片自己的拍攝日期
                 const cap = [ph.taken_at || log.log_date, ph.recorder_name, ph.photo_description]
                     .filter(Boolean).join(' · ');
