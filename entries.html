@@ -101,6 +101,7 @@
         }
         .photo-item .taken-warn { font-size: 10px; color: #8b2e2e; margin-top: 2px; }
         .sub-label { font-size: 12px; color: var(--color-accent); margin-top: 12px; }
+        .ver { font-size: 11px; color: var(--color-muted); margin-left: auto; }
 
         /* 該項目的最新紀錄 + 模式切換 */
         .latest-box {
@@ -401,6 +402,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v10/12c</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -542,14 +544,18 @@
             </div>
 
             <div class="form-group">
-                <label>照片</label>
+                <label>照片與附件</label>
                 <div class="photo-btns">
                     <button type="button" id="cameraBtn">📷 拍照（可連續）</button>
+                    <button type="button" id="albumBtn">🖼 從相簿選（圖片）</button>
+                    <button type="button" id="docBtn">📎 選檔案（PDF／Word／Excel）</button>
                     <input type="file" id="cameraFiles" accept="image/*" capture="environment" class="hidden">
+                    <input type="file" id="albumFiles" accept="image/*" multiple class="hidden">
+                    <input type="file" id="docFiles" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple class="hidden">
                 </div>
                 <div id="dropZone" class="drop-zone">
-                    <span class="big">🖼 從相簿選（可多選）</span>
-                    <span class="sub">點這裡選檔，電腦上也可以把圖片拖進來</span>
+                    <span class="big">📎 點這裡選任何檔案</span>
+                    <span class="sub">圖片、PDF、Word／Excel／PowerPoint（單檔 25MB 內）；電腦上可以直接拖進來</span>
                     <input type="file" id="photoFiles" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple class="hidden">
                 </div>
                 <div id="photoPreview"></div>
@@ -1055,7 +1061,7 @@
         // kk 2026-10-12：不再只收照片 —— 也收 PDF 與 Office 文件，單檔上限 25MB
         const MAX_FILE_MB = 25;
         const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
-        const FILE_ACCEPT = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx';
+        // 允許上傳：圖片 ＋ PDF ＋ Office 文件（單檔 25MB）
         const IMG_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'avif', 'tif'];
         const DOC_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
 
@@ -3308,10 +3314,12 @@
                     補<strong>舊照片</strong>時改成拍攝當天 —— 系統會依拍攝日期把照片排到正確的位置。<br>
                     PDF／Office 檔案不受這個日期影響（一律排在同一天的照片後面）。</div>
                 <div class="add-photo-bar">
-                    <button type="button" class="ghost small" id="ee-pick-photos">🖼 從相簿選</button>
+                    <button type="button" class="ghost small" id="ee-pick-photos">🖼 從相簿選（圖片）</button>
+                    <button type="button" class="ghost small" id="ee-doc-btn">📎 選檔案（PDF／Word）</button>
                     <button type="button" class="ghost small" id="ee-camera">📷 拍照（可連續）</button>
                 </div>
-                <input type="file" id="ee-photo-files" accept="${FILE_ACCEPT}" multiple class="hidden">
+                <input type="file" id="ee-photo-files" accept="image/*" multiple class="hidden">
+                <input type="file" id="ee-doc-files" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple class="hidden">
                 <input type="file" id="ee-camera-files" accept="image/*" capture="environment" class="hidden">
                 <div id="ee-photo-preview"></div>
                 <div id="ee-photo-urls"></div>
@@ -3415,6 +3423,19 @@
                     const files = [...(ev.target.files || [])];
                     const added = addEditFiles(files);
                     ev.target.value = '';   // 允許再拍一張
+                    if (!added && !files.length) say('listMsg', '沒有選到檔案', 'error');
+                    renderEditPhotoPreview();
+                };
+            }
+            // 選檔案（PDF／Office）：accept 只有文件副檔名，手機才會開檔案選擇器
+            const docBtn2 = box.querySelector('#ee-doc-btn');
+            const docInp2 = box.querySelector('#ee-doc-files');
+            if (docBtn2 && docInp2) {
+                docBtn2.onclick = () => docInp2.click();
+                docInp2.onchange = ev => {
+                    const files = [...(ev.target.files || [])];
+                    const added = addEditFiles(files);
+                    ev.target.value = '';
                     if (!added && !files.length) say('listMsg', '沒有選到檔案', 'error');
                     renderEditPhotoPreview();
                 };
@@ -3788,11 +3809,23 @@
         // 文字欄是唯一來源：直接打字也要即時更新面板
         if ($('work_type')) $('work_type').addEventListener('input', () => refreshPair());
 
-        // 拍照（可連續：每按一次加一張，不會蓋掉前面拍的）/ 選檔 / 拖放
+        // 拍照（可連續：每按一次加一張，不會蓋掉前面拍的）/ 從相簿選 / 選檔案 / 拖放
+        // ⚠️ 手機的檔案挑選器會看 accept：混了 image/* 就只開「相簿」→ 所以分成兩顆，
+        //    「選檔案」那顆的 accept 只有文件副檔名，手機才會直接開檔案選擇器。
         $('cameraBtn').onclick = () => $('cameraFiles').click();
         $('cameraFiles').addEventListener('change', e => {
             addFiles(e.target.files);
             e.target.value = '';   // 允許再拍同一張／再一次
+        });
+        $('albumBtn').onclick = () => $('albumFiles').click();
+        $('albumFiles').addEventListener('change', e => {
+            addFiles(e.target.files);
+            e.target.value = '';   // 允許重選同一個檔案
+        });
+        $('docBtn').onclick = () => $('docFiles').click();
+        $('docFiles').addEventListener('change', e => {
+            addFiles(e.target.files);
+            e.target.value = '';
         });
         $('dropZone').onclick = () => $('photoFiles').click();
         $('photoFiles').addEventListener('change', e => {
