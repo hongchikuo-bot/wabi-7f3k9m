@@ -103,6 +103,21 @@
         .sub-label { font-size: 12px; color: var(--color-accent); margin-top: 12px; }
         .ver { font-size: 11px; color: var(--color-muted); margin-left: auto; }
 
+        /* 紀錄分類（kk 2026-10-12）：外包 / 可自行處理 / 急件 */
+        .kind-tag {
+            font-size: 10.5px; padding: 1px 6px; border-radius: 3px;
+            border: 1px solid currentColor; white-space: nowrap; line-height: 1.5;
+        }
+        .kind-tag.kind-urgent { color: #a8412f; }
+        .kind-tag.kind-outsource { color: #3f5f7a; }
+        .kind-tag.kind-self { color: #6b8e5c; }
+        .item-row.kind-urgent { border-left: 3px solid #a8412f; padding-left: 0.5rem; background: #fdf1ef; }
+        .item-row.kind-outsource { border-left: 3px solid #3f5f7a; padding-left: 0.5rem; background: #f0f5fa; }
+        .item-row.kind-self { border-left: 3px solid #6b8e5c; padding-left: 0.5rem; background: #f2f7ef; }
+        .rec.kind-urgent { border-left: 3px solid #a8412f; background: #fdf1ef; }
+        .rec.kind-outsource { border-left: 3px solid #3f5f7a; background: #f0f5fa; }
+        .rec.kind-self { border-left: 3px solid #6b8e5c; background: #f2f7ef; }
+
         /* 該項目的最新紀錄 + 模式切換 */
         .latest-box {
             background: #eef2f7; border: 1px solid #d8e0ea; border-radius: 4px;
@@ -471,6 +486,21 @@
                 </div>
             </div>
 
+            <!-- ③ 分類（kk 2026-10-12）：掛在這一筆紀錄上，看板卡片會跟著變色並排序 -->
+            <div class="form-group">
+                <label>分類（選填）</label>
+                <select id="task_kind">
+                    <option value="">未分類</option>
+                    <option value="urgent">🔴 急件</option>
+                    <option value="outsource">🔵 外包</option>
+                    <option value="self">🟢 可自行處理</option>
+                </select>
+                <div class="hint">
+                    看板會依這個分類<strong>變顏色</strong>，同一欄裡<strong>急件排最上面</strong>，
+                    再來是外包、可自行處理，最後才是未分類。
+                </div>
+            </div>
+
             <!-- 選了工項才出現：這個工項目前的狀況（純顯示） -->
             <div id="latestWrap" class="hidden">
                 <div id="latestPanel"></div>
@@ -701,6 +731,7 @@
             await probeProcurementPublic();
             await probeCompletedBy();
             await probeFinishAt();
+            await probeTaskKind();
             if (HAS_CURRENCY) await loadRates();
             if (!HAS_TODOS) await loadTodos();   // 先探一次（失敗也無所謂，畫面照常）
             await fetchMyName();
@@ -1375,6 +1406,22 @@
             return HAS_FINISH_AT;
         }
 
+        // 紀錄分類（外包／可自行處理／急件）—— 新欄位 project_logs.task_kind
+        // 沒跑 SQL 前 HAS_TASK_KIND = false → 下拉不出現、也不會送這個欄位（不會壞）
+        let HAS_TASK_KIND = false;
+
+        async function probeTaskKind() {
+            const { error } = await supabase.from('project_logs').select('task_kind').limit(0);
+            HAS_TASK_KIND = !error;
+            return HAS_TASK_KIND;
+        }
+
+        function kindOptions(cur) {
+            return [['', '未分類'], ['urgent', '🔴 急件'], ['outsource', '🔵 外包'], ['self', '🟢 可自行處理']]
+                .map(([v, t]) => `<option value="${v}"${v === (cur || '') ? ' selected' : ''}>${t}</option>`)
+                .join('');
+        }
+
         // 自己的顯示名稱（profiles 的 SELECT 政策允許讀「本人」）
         async function fetchMyName() {
             try {
@@ -1561,6 +1608,8 @@
             // 留空時「不要送這個欄位」，讓資料庫套用預設值。送 null 會違反 NOT NULL。
             const logTime = $('log_time').value;
             if (logTime) payload.log_time = logTime;
+            // 分類（外包／可自行處理／急件）——沒跑 SQL 前不送
+            if (HAS_TASK_KIND) payload.task_kind = ($('task_kind') && $('task_kind').value) || null;
             // 紀錄人：自動帶入登入者的名字（每人一個帳號）
             if (HAS_RECORDER) payload.recorder_name = MY_NAME || null;
 
@@ -1702,6 +1751,8 @@
             ['log_time', 'work_type'].forEach(id => {
                 if ($(id)) $(id).value = '';
             });
+            // 分類也清掉（下一筆通常不同分類）
+            if ($('task_kind')) $('task_kind').value = '';
             if ($('workTypePick')) $('workTypePick').value = '';
             if ($('resolution')) $('resolution').value = '';     // 清掉「這次新增的待辦」緩衝
             if ($('newTodoText')) $('newTodoText').value = '';
@@ -1791,7 +1842,9 @@
                 .from('project_logs')
                 .select('id, log_date, log_time, location, main_description, progress_status, '
                        + 'issues_found, resolution, notes, project_id, item_id, node_id, created_at'
-                       + recCol + ', log_photos(' + photoCols + '), '
+                       + recCol
+                       + (HAS_TASK_KIND ? ', task_kind' : '')
+                       + ', log_photos(' + photoCols + '), '
                        + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at'
                        + (HAS_FINISH_AT ? ', end_date' : '')
                        + (HAS_QUOTES ? ', quotes' : '')
@@ -1933,6 +1986,8 @@
                 completed_by: e.items ? e.items.completed_by : null,
                 // 預估完成時間（items.end_date）
                 finish_at: e.items ? (e.items.end_date || null) : null,
+                // 分類（外包／可自行處理／急件）
+                task_kind: e.task_kind || null,
             };
         }
 
@@ -1988,10 +2043,11 @@
             const photo = (e.log_photos && e.log_photos[0]) || {};
             // 最新那筆預設就攤開成可編輯（一進浮層就看得到欄位）；其他筆維持唯讀
             const isOpen = e.id === (openId || editingEntryId);
-            return `<div class="rec">
+            return `<div class="rec${e.task_kind ? ' kind-' + e.task_kind : ''}">
                 <div class="rec-head">
                     <span class="rec-date">${esc(e.log_date)}${e.log_time ? ' ' + esc(String(e.log_time).slice(0, 5)) : ''}</span>
                     ${recName ? `<span class="rec-by">紀錄：${esc(recName)}</span>` : ''}
+                    ${e.task_kind ? `<span class="kind-tag kind-${esc(e.task_kind)}">${esc(kindLabel(e.task_kind))}</span>` : ''}
                     ${isDone ? '<span class="badge done">已完成</span>' : ''}
                 </div>
                 ${isOpen ? '' : `
@@ -2167,10 +2223,11 @@
                 ? maintLine(it.next_maintenance_at) : '';
             // 需注意（且還沒完成付款）→ 整張卡變色凸顯
             const flagAttention = !!(it.need_attention && !it.payment_done);
-            return `<div class="item-row${flagAttention ? ' need-attention' : ''}" data-item="${esc(it.itemId)}">
+            return `<div class="item-row${flagAttention ? ' need-attention' : ''}${it.kind ? ' kind-' + it.kind : ''}" data-item="${esc(it.itemId)}">
                 <div class="item-head" data-item-head>
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
                     <span class="it-title">${esc(it.title)}</span>
+                    ${it.kind ? `<span class="kind-tag kind-${esc(it.kind)}">${esc(kindLabel(it.kind))}</span>` : ''}
                     ${flagAttention ? '<span class="flag-warn">⚠️ 需業主注意</span>' : ''}
                     ${it.status !== '_loose'
                         ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`
@@ -3291,6 +3348,8 @@
                         ${wtList.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}</select>
                         <input type="text" id="ee-worktype" value="${esc(curWT)}"
                                placeholder="例：主牆塗漿（留空＝不歸屬任何工項）"></div>
+                    ${HAS_TASK_KIND ? `<div><label>分類</label>
+                        <select id="ee-kind">${kindOptions(e.task_kind)}</select></div>` : ''}
                     <div class="full"><label>主描述</label>
                         <textarea id="ee-desc" rows="2">${esc(e.main_description || '')}</textarea></div>
                     <div class="full"><label>發現問題</label>
@@ -3555,6 +3614,11 @@
                 // 進度快照＝送出當下那張進度卡的狀態（進度現在在浮層最上面改）
                 progress_status: itemId ? itemStatusNow : null
             };
+            // 分類（外包／可自行處理／急件）——沒跑 SQL 前不送
+            if (HAS_TASK_KIND) {
+                const kSel = $('ee-kind');
+                payload.task_kind = (kSel && kSel.value) || null;
+            }
             // log_time 是 NOT NULL：留空時「不要送這個欄位」，保留原本的值
             const t = $('ee-time').value;
             if (t) payload.log_time = t;

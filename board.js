@@ -17,6 +17,15 @@ const STATUS_ORDER = ['', 'in_progress', 'paused', 'completed'];
 const GROUP_TITLE = { '': '開案（待辦）', in_progress: '進行中', paused: '暫停', completed: '已完成' };
 const STATUS_LABEL = { '': '開案', completed: '已完成', in_progress: '進行中', paused: '暫停' };
 const STATUS_CLASS = { '': 'opened', completed: 'done', in_progress: 'doing', paused: 'paused' };
+
+// 紀錄分類（kk 2026-10-12）：外包 / 可自行處理 / 急件。沒勾＝未分類。
+// 顯示順序（權重）：急件 → 外包 → 可自行處理 → 未分類
+const KIND_ORDER = ['urgent', 'outsource', 'self'];
+const KIND_LABEL = { urgent: '急件', outsource: '外包', self: '可自行處理' };
+const KIND_COLOR = { urgent: '#a8412f', outsource: '#3f5f7a', self: '#6b8e5c' };
+
+function kindRank(k) { const i = KIND_ORDER.indexOf(k); return i < 0 ? 99 : i; }
+function kindLabel(k) { return KIND_LABEL[k] || ''; }
 // 已完成＝做完的，預設收起來，資料多時才找得到東西
 const COLLAPSED_BY_DEFAULT = { completed: true };
 
@@ -134,6 +143,8 @@ function buildTree(logs) {
             payment_amount: last.payment_amount || null,
             pdf_note: last.pdf_note || null,
             finish_at: last.finish_at || null,
+            // 這張卡的「分類」＝最新那筆紀錄的分類（紀錄掛分類，卡片跟著顯示）
+            kind: last.task_kind || null,
         });
     }
     for (const g of groups) {
@@ -141,6 +152,9 @@ function buildTree(logs) {
         // 長期維修工項一律沉到最下面
         g.items.sort((a, b) => {
             if (!!a.maintenance !== !!b.maintenance) return a.maintenance ? 1 : -1;
+            // 分類優先：急件 → 外包 → 可自行處理 → 未分類（kk 2026-10-12）
+            const ka = kindRank(a.kind), kb = kindRank(b.kind);
+            if (ka !== kb) return ka - kb;
             return g.status === 'completed'
                 ? String(b.opening).localeCompare(String(a.opening))
                 : String(a.opening).localeCompare(String(b.opening));
@@ -162,6 +176,7 @@ function buildTree(logs) {
                 logs: [l], shots: (l.photos ? l.photos.length : 0),
                 byNames: l.recorder_name ? [l.recorder_name] : [],
                 opening: l.log_date || '', days: daysSince(l.log_date),
+                kind: l.task_kind || null,
             })),
         });
     }
