@@ -445,7 +445,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
-        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/06h</span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/06i</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -2340,7 +2340,7 @@
                     <button data-save-edit="${esc(openId)}">儲存編輯紀錄</button>
                     <button class="ghost" data-cancel-edit="${esc(openId)}">取消</button>
                     <div class="hint save-hint">只儲存下面「編輯紀錄」的日期／地點／工項／描述／照片。<br>
-                        上面那幾列（狀態、勾選、完成時間、費用）→ <strong>一改就生效，不用按儲存</strong>。</div>
+                        上面那幾列（狀態、勾選、完成時間）→ 一改就生效，不用按儲存；費用有自己的「儲存費用」按鈕。</div>
                 </div>` : ''}
                 ${statusBlock(it)}
                 ${it.maintenance ? `
