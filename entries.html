@@ -283,6 +283,12 @@
         .cost-head { display: flex; align-items: center; gap: 0.4rem; }
         /* 編輯表單上下各一組儲存／取消 */
         .edit-actions-top { margin: 0 0 0.8rem; padding-bottom: 0.7rem; border-bottom: 1px dashed var(--color-line); }
+        /* 浮層最上面那組儲存（頁面頂端，說明哪些是即時生效） */
+        .sheet-actions-top {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem;
+            margin: 0.2rem 0 0.6rem; padding-bottom: 0.6rem; border-bottom: 1px dashed var(--color-line);
+        }
+        .sheet-actions-top .save-hint { flex-basis: 100%; font-size: 0.72rem; line-height: 1.45; margin: 0.15rem 0 0; }
         /* 需注意 → 卡片變色凸顯 */
         .item-row.need-attention { background: #f6e6c4; border-left: 3px solid #d9a441; padding-left: 0.5rem; }
 
@@ -439,7 +445,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
-        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/06g</span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/06h</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -2329,6 +2335,13 @@
                     <button type="button" class="sheet-close" title="關閉">&times;</button>
                 </div>
                 <div class="sheet-meta">${esc(meta)}</div>
+                ${openId ? `
+                <div class="edit-actions sheet-actions-top">
+                    <button data-save-edit="${esc(openId)}">儲存編輯紀錄</button>
+                    <button class="ghost" data-cancel-edit="${esc(openId)}">取消</button>
+                    <div class="hint save-hint">只儲存下面「編輯紀錄」的日期／地點／工項／描述／照片。<br>
+                        上面那幾列（狀態、勾選、完成時間、費用）→ <strong>一改就生效，不用按儲存</strong>。</div>
+                </div>` : ''}
                 ${statusBlock(it)}
                 ${it.maintenance ? `
                 <div class="maint-sheet-row">
@@ -2709,15 +2722,17 @@
             const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.estimate_currency, last.final_currency) : '';
             return `<div class="cost-block">
                 <div class="cost-head">💰 費用
-                    <label class="cost-toggle"><input type="checkbox" data-cost-open="${esc(it.itemId)}"> 填／改費用</label>
+                    <label class="cost-toggle"><input type="checkbox" data-cost-open="${esc(it.itemId)}"> 顯示／填寫費用</label>
                 </div>
                 ${cost ? `<div class="money">${cost}</div>` : ''}
-                ${costEditHtml(it)}
-                ${quoteBlock(it)}
-                ${pdfRow(it)}
-                ${costCompareBlock(it)}
-                ${procurementToggle(it)}
-                ${payBlock(it)}
+                <div class="cost-body hidden" data-cost-body="${esc(it.itemId)}">
+                    ${costEditHtml(it)}
+                    ${quoteBlock(it)}
+                    ${pdfRow(it)}
+                    ${costCompareBlock(it)}
+                    ${procurementToggle(it)}
+                    ${payBlock(it)}
+                </div>
             </div>`;
         }
 
@@ -3200,11 +3215,11 @@
             box.querySelectorAll('[data-edit]').forEach(btn => {
                 btn.onclick = () => startEditEntry(btn.getAttribute('data-edit'));
             });
-            // 費用：勾「填／改費用」才展開輸入表單
+            // 費用：勾「顯示／填寫費用」才展開整個費用區（表單/報價單/費用分析/付款）
             box.querySelectorAll('[data-cost-open]').forEach(cb => {
                 cb.onchange = () => {
                     const id = cb.getAttribute('data-cost-open');
-                    const f = box.querySelector(`[data-cost-edit-box="${id}"]`);
+                    const f = box.querySelector(`[data-cost-body="${id}"]`);
                     if (f) f.classList.toggle('hidden', !cb.checked);
                 };
             });
@@ -3382,10 +3397,6 @@
             const t = e.log_time ? String(e.log_time).slice(0, 5) : '';
             return `
             <div class="edit-block">
-                <div class="edit-actions edit-actions-top">
-                    <button data-save-edit="${esc(e.id)}">儲存</button>
-                    <button class="ghost" data-cancel-edit="${esc(e.id)}">取消</button>
-                </div>
                 <div class="ef-grid">
                     <div><label>日期</label><input type="date" id="ee-date" value="${esc(e.log_date)}"></div>
                     <div><label>時間</label><input type="time" id="ee-time" value="${esc(t)}"></div>
