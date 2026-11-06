@@ -118,6 +118,16 @@
         .rec.kind-outsource { border-left: 3px solid #3f5f7a; background: #f0f5fa; }
         .rec.kind-self { border-left: 3px solid #6b8e5c; background: #f2f7ef; }
 
+        /* 「自己可執行」（借 items.contractor = 'self'）→ 卡片變綠色，一眼看出可以自己做
+           ⚠️ 這條要放在 .item-row.need-attention 之前 —— 兩個都勾時，「需業主注意」優先顯示黃色 */
+        .item-row.self-doable {
+            border-left: 3px solid #6b8e5c; padding-left: 0.5rem; background: #eef5ea;
+        }
+        .self-tag {
+            font-size: 10.5px; color: #4f6b43; border: 1px solid currentColor;
+            border-radius: 3px; padding: 1px 6px; white-space: nowrap; line-height: 1.5;
+        }
+
         /* 該項目的最新紀錄 + 模式切換 */
         .latest-box {
             background: #eef2f7; border: 1px solid #d8e0ea; border-radius: 4px;
@@ -1845,7 +1855,7 @@
                        + recCol
                        + (HAS_TASK_KIND ? ', task_kind' : '')
                        + ', log_photos(' + photoCols + '), '
-                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at'
+                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at, contractor'
                        + (HAS_FINISH_AT ? ', end_date' : '')
                        + (HAS_QUOTES ? ', quotes' : '')
                        + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done, verified, verified_by' : '')
@@ -1988,6 +1998,8 @@
                 finish_at: e.items ? (e.items.end_date || null) : null,
                 // 分類（外包／可自行處理／急件）
                 task_kind: e.task_kind || null,
+                // 自己可執行（items.contractor = 'self'）
+                self_doable: !!(e.items && e.items.contractor === 'self'),
             };
         }
 
@@ -2223,10 +2235,11 @@
                 ? maintLine(it.next_maintenance_at) : '';
             // 需注意（且還沒完成付款）→ 整張卡變色凸顯
             const flagAttention = !!(it.need_attention && !it.payment_done);
-            return `<div class="item-row${flagAttention ? ' need-attention' : ''}${it.kind ? ' kind-' + it.kind : ''}" data-item="${esc(it.itemId)}">
+            return `<div class="item-row${flagAttention ? ' need-attention' : ''}${it.kind ? ' kind-' + it.kind : ''}${it.self_doable ? ' self-doable' : ''}" data-item="${esc(it.itemId)}">
                 <div class="item-head" data-item-head>
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
                     <span class="it-title">${esc(it.title)}</span>
+                    ${it.self_doable ? '<span class="self-tag">✅ 自己可執行</span>' : ''}
                     ${it.kind ? `<span class="kind-tag kind-${esc(it.kind)}">${esc(kindLabel(it.kind))}</span>` : ''}
                     ${flagAttention ? '<span class="flag-warn">⚠️ 需業主注意</span>' : ''}
                     ${it.status !== '_loose'
@@ -2641,6 +2654,7 @@
                         <input type="text" class="verify-name" data-completed-by="${esc(it.itemId)}" value="${esc(it.completed_by || '')}" placeholder="填名字"></label>` : ''}
                     ${HAS_CURRENCY ? `
                     <label class="sb-chk"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需業主注意</label>` : ''}
+                    <label class="sb-chk"><input type="checkbox" data-flag="self_doable" data-flag-item="${esc(it.itemId)}"${it.self_doable ? ' checked' : ''}>✅ 自己可執行</label>
                     <span class="sb-hint">「開案 / 進行中 / 暫停」都是未完成；選「已完成」整張卡就結案。</span>
                     ${(st === 'completed' && !it.maintenance) ? maintCreateBlock(it) : ''}
                 </div>
@@ -2703,9 +2717,13 @@
         }
 
         async function toggleFlag(itemId, field, checked) {
+            // 「自己可執行」不是布林欄位：借用 items.contractor（text）存 'self' / null
+            // → 不用新增欄位、不用跑 SQL（kk 2026-11-06 要求）
+            const dbField = field === 'self_doable' ? 'contractor' : field;
+            const dbValue = field === 'self_doable' ? (checked ? 'self' : null) : checked;
             try {
                 const { error } = await supabase.from('items')
-                    .update({ [field]: checked }).eq('id', itemId).select('id');
+                    .update({ [dbField]: dbValue }).eq('id', itemId).select('id');
                 if (error) throw error;
                 // 勾「需注意」→ 順手產生付款注意單 PDF（內部會重繪）
                 if (field === 'need_attention' && checked) {
