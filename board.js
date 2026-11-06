@@ -154,6 +154,8 @@ function buildTree(logs) {
         // 長期維修工項一律沉到最下面
         g.items.sort((a, b) => {
             if (!!a.maintenance !== !!b.maintenance) return a.maintenance ? 1 : -1;
+            // 「自己可執行」的綠卡集中排最上面（kk 2026-11-06）
+            if (!!a.self_doable !== !!b.self_doable) return a.self_doable ? -1 : 1;
             // 分類優先：急件 → 外包 → 可自行處理 → 未分類（kk 2026-10-12）
             const ka = kindRank(a.kind), kb = kindRank(b.kind);
             if (ka !== kb) return ka - kb;

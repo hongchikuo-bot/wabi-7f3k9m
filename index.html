@@ -320,6 +320,8 @@
         .rec-notes { font-size: 0.8rem; color: var(--color-muted); margin-top: 0.2rem; white-space: pre-wrap; }
         /* 公開頁需注意 → 卡片變色 */
         .item-row.need-attention { background: #f6e6c4; border-left: 3px solid #d9a441; padding-left: 0.5rem; margin: 0.5rem 0; border-radius: 6px; }
+        /* 同時勾「需業主注意」＋「自己可執行」→ 黃底（警示優先）＋ 綠左條 */
+        .item-row.need-attention.self-doable { background: #f6e6c4; border-left: 3px solid #6b8e5c; }
         /* 付款區塊（PDF + 已付款 + 水單上傳） */
         .pub-pay { margin: 0.4rem 0 0.8rem; padding: 0.6rem 0.8rem; border: 1px dashed var(--color-line); border-radius: 6px; background: #fffdf9; }
         .pub-pay-head { font-size: 0.82rem; color: var(--color-accent); font-weight: 600; margin-bottom: 0.4rem; }
@@ -774,7 +776,7 @@
                 <div class="item-head">
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
                     <span class="it-title">${esc(it.title)}</span>
-                    ${it.self_doable ? '<span class="self-tag">✅ 自己可執行</span>' : ''}
+                    ${it.self_doable ? '<span class="self-tag">自己可執行</span>' : ''}
                     ${it.kind ? `<span class="kind-tag kind-${esc(it.kind)}">${esc(kindLabel(it.kind))}</span>` : ''}
                     ${it.status !== '_loose'
                         ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`

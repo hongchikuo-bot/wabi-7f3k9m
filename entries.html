@@ -277,6 +277,10 @@
         .cost-block .flag-pay { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid #eadfcb; }
         /* 需注意 → 卡片變色凸顯 */
         .item-row.need-attention { background: #f6e6c4; border-left: 3px solid #d9a441; padding-left: 0.5rem; }
+
+        /* 同時勾「需業主注意」＋「自己可執行」→ 黃底（警示優先）＋ 綠左條（仍看得出可以自己做）
+           ⚠️ 一定要放在 .item-row.need-attention 後面才蓋得掉左條顏色 */
+        .item-row.need-attention.self-doable { background: #f6e6c4; border-left: 3px solid #6b8e5c; }
         .flag-warn { font-size: 0.72rem; color: #a06a00; font-weight: 600; white-space: nowrap; }
         /* 看板卡上的維修行（維修工項） */
         .it-maint {
@@ -427,7 +431,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
-        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/06e</span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/06f</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -2239,7 +2243,7 @@
                 <div class="item-head" data-item-head>
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
                     <span class="it-title">${esc(it.title)}</span>
-                    ${it.self_doable ? '<span class="self-tag">✅ 自己可執行</span>' : ''}
+                    ${it.self_doable ? '<span class="self-tag">自己可執行</span>' : ''}
                     ${it.kind ? `<span class="kind-tag kind-${esc(it.kind)}">${esc(kindLabel(it.kind))}</span>` : ''}
                     ${flagAttention ? '<span class="flag-warn">⚠️ 需業主注意</span>' : ''}
                     ${it.status !== '_loose'
@@ -2654,7 +2658,7 @@
                         <input type="text" class="verify-name" data-completed-by="${esc(it.itemId)}" value="${esc(it.completed_by || '')}" placeholder="填名字"></label>` : ''}
                     ${HAS_CURRENCY ? `
                     <label class="sb-chk"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需業主注意</label>` : ''}
-                    <label class="sb-chk"><input type="checkbox" data-flag="self_doable" data-flag-item="${esc(it.itemId)}"${it.self_doable ? ' checked' : ''}>✅ 自己可執行</label>
+                    <label class="sb-chk"><input type="checkbox" data-flag="self_doable" data-flag-item="${esc(it.itemId)}"${it.self_doable ? ' checked' : ''}>自己可執行</label>
                     <span class="sb-hint">「開案 / 進行中 / 暫停」都是未完成；選「已完成」整張卡就結案。</span>
                     ${(st === 'completed' && !it.maintenance) ? maintCreateBlock(it) : ''}
                 </div>
