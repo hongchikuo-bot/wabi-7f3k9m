@@ -146,7 +146,7 @@ function buildTree(logs) {
             // 這張卡的「分類」＝最新那筆紀錄的分類（紀錄掛分類，卡片跟著顯示）
             kind: last.task_kind || null,
             // 自己可執行（借用 items.contractor = 'self'，進去時已正規化成 self_doable）
-            self_doable: !!last.self_doable,
+            self_doable: !!(last.self_doable || last.contractor === 'self'),
         });
     }
     for (const g of groups) {

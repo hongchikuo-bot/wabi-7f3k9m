@@ -262,6 +262,23 @@
         .it-loc { font-size: 0.85rem; color: var(--color-accent); opacity: 0.75; }
         .it-title { font-size: 1rem; font-weight: 500; }
         .it-meta { flex-basis: 100%; font-size: 0.75rem; color: var(--color-muted); }
+
+        /* 分類標籤／自己可執行（公開頁也顯示，讓業主看得懂） */
+        .kind-tag {
+            font-size: 0.62rem; padding: 0.02rem 0.32rem; border-radius: 3px;
+            border: 1px solid currentColor; white-space: nowrap; line-height: 1.5;
+        }
+        .kind-tag.kind-urgent { color: #a8412f; }
+        .kind-tag.kind-outsource { color: #3f5f7a; }
+        .kind-tag.kind-self { color: #6b8e5c; }
+        .self-tag {
+            font-size: 0.62rem; color: #4f6b43; border: 1px solid currentColor;
+            border-radius: 3px; padding: 0.02rem 0.32rem; white-space: nowrap; line-height: 1.5;
+        }
+        .item-row.self-doable { border-left: 3px solid #6b8e5c; background: #eef5ea; }
+        .item-row.kind-urgent { border-left: 3px solid #a8412f; background: #fdf1ef; }
+        .item-row.kind-outsource { border-left: 3px solid #3f5f7a; background: #f0f5fa; }
+        .item-row.kind-self { border-left: 3px solid #6b8e5c; background: #f2f7ef; }
         .it-edit {
             margin-left: auto; font-size: 0.78rem; color: var(--color-accent);
             text-decoration: none; border: 1px solid rgba(90, 77, 63, 0.3);
@@ -753,10 +770,12 @@
                 openTodos.length ? '待辦' + openTodos.length : '',
                 (it.quotes || []).length ? '報價' + (it.quotes || []).length : '',
             ].filter(Boolean).join(' · ');
-            return `<div class="item-row${it.need_attention && !it.payment_done ? ' need-attention' : ''}" data-item="${esc(it.itemId)}" onclick="toggleItem(this)">
+            return `<div class="item-row${it.need_attention && !it.payment_done ? ' need-attention' : ''}${it.kind ? ' kind-' + it.kind : ''}${it.self_doable ? ' self-doable' : ''}" data-item="${esc(it.itemId)}" onclick="toggleItem(this)">
                 <div class="item-head">
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
                     <span class="it-title">${esc(it.title)}</span>
+                    ${it.self_doable ? '<span class="self-tag">✅ 自己可執行</span>' : ''}
+                    ${it.kind ? `<span class="kind-tag kind-${esc(it.kind)}">${esc(kindLabel(it.kind))}</span>` : ''}
                     ${it.status !== '_loose'
                         ? `<span class="chip ${STATUS_CLASS[it.status] || ''}">${esc(STATUS_LABEL[it.status] || '開案')}</span>`
                         : ''}
