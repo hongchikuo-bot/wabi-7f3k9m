@@ -275,6 +275,14 @@
         .cost-head { font-size: 0.88rem; font-weight: 600; color: var(--color-accent); margin-bottom: 0.5rem; }
         .cost-block .cost-edit { border: none; padding: 0; margin: 0.4rem 0 0.5rem; }
         .cost-block .flag-pay { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid #eadfcb; }
+        /* 費用：勾選才展開輸入表單 */
+        .cost-toggle {
+            margin-left: auto; font-size: 0.78rem; color: var(--color-accent);
+            display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; font-weight: 400;
+        }
+        .cost-head { display: flex; align-items: center; gap: 0.4rem; }
+        /* 編輯表單上下各一組儲存／取消 */
+        .edit-actions-top { margin: 0 0 0.8rem; padding-bottom: 0.7rem; border-bottom: 1px dashed var(--color-line); }
         /* 需注意 → 卡片變色凸顯 */
         .item-row.need-attention { background: #f6e6c4; border-left: 3px solid #d9a441; padding-left: 0.5rem; }
 
@@ -431,7 +439,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
-        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/06f</span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/06g</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -2383,7 +2391,7 @@
             const finCur = item.final_currency || '';
             const curOpts = k => CURRENCY_OPTIONS.map(([v, l]) =>
                 `<option value="${v}"${k === v ? ' selected' : ''}>${l}</option>`).join('');
-            return `<div class="cost-edit" data-cost-edit-box="${esc(it.itemId)}">
+            return `<div class="cost-edit hidden" data-cost-edit-box="${esc(it.itemId)}">
                 <div class="cost-edit-grid">
                     <label>預估款
                         <span class="cur-amt">${HAS_CURRENCY ? `<select data-cost-currency="estimate">${curOpts(estCur)}</select>` : ''}
@@ -2700,7 +2708,9 @@
             const last = it.logs && it.logs[it.logs.length - 1];
             const cost = (last && last.src) ? costLine(last.est, last.fin, last.paid, last.estimate_currency, last.final_currency) : '';
             return `<div class="cost-block">
-                <div class="cost-head">💰 費用</div>
+                <div class="cost-head">💰 費用
+                    <label class="cost-toggle"><input type="checkbox" data-cost-open="${esc(it.itemId)}"> 填／改費用</label>
+                </div>
                 ${cost ? `<div class="money">${cost}</div>` : ''}
                 ${costEditHtml(it)}
                 ${quoteBlock(it)}
@@ -3190,6 +3200,14 @@
             box.querySelectorAll('[data-edit]').forEach(btn => {
                 btn.onclick = () => startEditEntry(btn.getAttribute('data-edit'));
             });
+            // 費用：勾「填／改費用」才展開輸入表單
+            box.querySelectorAll('[data-cost-open]').forEach(cb => {
+                cb.onchange = () => {
+                    const id = cb.getAttribute('data-cost-open');
+                    const f = box.querySelector(`[data-cost-edit-box="${id}"]`);
+                    if (f) f.classList.toggle('hidden', !cb.checked);
+                };
+            });
             // 費用：改費用／儲存／取消
             box.querySelectorAll('[data-cost-edit]').forEach(btn => {
                 btn.onclick = () => toggleCostEdit(btn.getAttribute('data-cost-edit'));
@@ -3284,15 +3302,18 @@
             box.querySelectorAll('[data-rate-key]').forEach(inp => {
                 inp.onchange = () => saveRate(inp.getAttribute('data-rate-key'), inp.value);
             });
-            const cancel = box.querySelector('[data-cancel-edit]');
-            if (cancel) cancel.onclick = () => {
-                editingEntryId = null;
-                EDIT_FILES = [];
-                EDIT_URLS = [];
-                renderEntries();
-            };
-            const save = box.querySelector('[data-save-edit]');
-            if (save) save.onclick = () => saveEntryEdit(save.getAttribute('data-save-edit'));
+            // 取消／儲存：上下各一組，全部都要綁（kk 2026-11-06 要求上面也有儲存）
+            box.querySelectorAll('[data-cancel-edit]').forEach(cancel => {
+                cancel.onclick = () => {
+                    editingEntryId = null;
+                    EDIT_FILES = [];
+                    EDIT_URLS = [];
+                    renderEntries();
+                };
+            });
+            box.querySelectorAll('[data-save-edit]').forEach(save => {
+                save.onclick = () => saveEntryEdit(save.getAttribute('data-save-edit'));
+            });
             box.querySelectorAll('[data-del-photo]').forEach(btn => {
                 btn.onclick = () => deletePhoto(
                     btn.getAttribute('data-photo-log'),
@@ -3361,6 +3382,10 @@
             const t = e.log_time ? String(e.log_time).slice(0, 5) : '';
             return `
             <div class="edit-block">
+                <div class="edit-actions edit-actions-top">
+                    <button data-save-edit="${esc(e.id)}">儲存</button>
+                    <button class="ghost" data-cancel-edit="${esc(e.id)}">取消</button>
+                </div>
                 <div class="ef-grid">
                     <div><label>日期</label><input type="date" id="ee-date" value="${esc(e.log_date)}"></div>
                     <div><label>時間</label><input type="time" id="ee-time" value="${esc(t)}"></div>
