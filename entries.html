@@ -274,6 +274,14 @@
         .cost-block { margin: 0 0 0.9rem; padding: 0.7rem 0.8rem; border: 1px dashed #d9c9a8; border-radius: 6px; background: #fffdf7; }
         .cost-head { font-size: 0.88rem; font-weight: 600; color: var(--color-accent); margin-bottom: 0.5rem; }
         .cost-block .cost-edit { border: none; padding: 0; margin: 0.4rem 0 0.5rem; }
+        /* 新增紀錄後：問要不要發到 LINE 群 */
+        .line-offer {
+            margin: 0 0 0.6rem; padding: 0.6rem 0.8rem; border-radius: 6px;
+            background: #eef5ea; border: 1px solid #cfe0c6;
+        }
+        .line-offer .lo-msg { font-size: 0.85rem; line-height: 1.5; }
+        .line-offer .lo-msg.ok { color: #4f6b43; font-weight: 600; }
+        .line-offer .lo-btns { margin-top: 0.45rem; display: flex; gap: 0.4rem; }
         .cost-block .flag-pay { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid #eadfcb; }
         /* 費用：勾選才展開輸入表單 */
         .cost-toggle {
@@ -445,7 +453,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
-        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/06i</span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/14a</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -469,6 +477,7 @@
         <!-- 新增紀錄（預設收起來，點標題才展開）-->
         <div class="card hidden" id="formCard">
             <div id="formMsg"></div>
+            <div id="lineOffer" class="line-offer hidden"></div>
             <div class="fold-head" id="formHead">
                 <h2>＋ 新增工程紀錄</h2>
                 <span class="fold-caret">▸</span>
@@ -760,6 +769,7 @@
             await probeCompletedBy();
             await probeFinishAt();
             await probeTaskKind();
+            await probeLineOutbox();
             if (HAS_CURRENCY) await loadRates();
             if (!HAS_TODOS) await loadTodos();   // 先探一次（失敗也無所謂，畫面照常）
             await fetchMyName();
@@ -1444,6 +1454,55 @@
             return HAS_TASK_KIND;
         }
 
+        // LINE 推播佇列（line_outbox）—— 沒跑 SQL 前 HAS_LINE_OUTBOX = false → 不出現「要發到 LINE 嗎」
+        let HAS_LINE_OUTBOX = false;
+
+        async function probeLineOutbox() {
+            const { error } = await supabase.from('line_outbox').select('id').limit(0);
+            HAS_LINE_OUTBOX = !error;
+            return HAS_LINE_OUTBOX;
+        }
+
+        // 新增紀錄後：這張卡如果是「自己可執行」→ 問要不要發到 LINE「郭家族群」
+        async function offerLinePush(logId, itemId) {
+            const box = $('lineOffer');
+            if (!box) return;
+            box.classList.add('hidden');
+            box.innerHTML = '';
+            if (!HAS_LINE_OUTBOX || !logId || !itemId) return;
+            let contractor = null;
+            try {
+                const { data } = await supabase.from('items')
+                    .select('contractor').eq('id', itemId).maybeSingle();
+                contractor = data ? data.contractor : null;
+            } catch (e) { contractor = null; }
+            if (contractor !== 'self') return;      // 不是「自己可執行」→ 不打擾
+
+            box.innerHTML = `
+                <div class="lo-msg">📣 這筆是「自己可執行」的工作 —— 要發到 LINE「郭家族群」嗎？</div>
+                <div class="lo-btns">
+                    <button type="button" class="primary small" id="lineSendBtn">發送到 LINE</button>
+                    <button type="button" class="ghost small" id="lineSkipBtn">不用</button>
+                </div>`;
+            box.classList.remove('hidden');
+            $('lineSendBtn').onclick = async () => {
+                const btn = $('lineSendBtn');
+                btn.disabled = true;
+                btn.textContent = '排入中…';
+                const { error } = await supabase.from('line_outbox')
+                    .insert([{ log_id: logId, item_id: itemId }]);
+                if (error) {
+                    const dup = error.code === '23505';
+                    box.innerHTML = `<div class="lo-msg">${dup
+                        ? '✅ 這筆已經送出過了（不會重複發）'
+                        : '❌ 排入發送失敗：' + esc(error.message)}</div>`;
+                    return;
+                }
+                box.innerHTML = '<div class="lo-msg ok">✅ 已排入發送，大約 1 分鐘內會出現在「郭家族群」。</div>';
+            };
+            $('lineSkipBtn').onclick = () => { box.classList.add('hidden'); box.innerHTML = ''; };
+        }
+
         function kindOptions(cur) {
             return [['', '未分類'], ['urgent', '🔴 急件'], ['outsource', '🔵 外包'], ['self', '🟢 可自行處理']]
                 .map(([v, t]) => `<option value="${v}"${v === (cur || '') ? ' selected' : ''}>${t}</option>`)
@@ -1769,6 +1828,8 @@
             setFormOpen(false);   // 收起來，回到看板（成功訊息留在標題上方）
             await loadEntries();
             await loadStructureOptions($('project_id').value);   // 更新工項清單與進度卡狀態
+            // 這筆的卡如果是「自己可執行」→ 問要不要發到 LINE「郭家族群」
+            await offerLinePush(log.id, itemId);
         }
 
         function clearForm() {
