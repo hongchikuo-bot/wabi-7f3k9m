@@ -276,6 +276,12 @@
             border-radius: 3px; padding: 0.02rem 0.32rem; white-space: nowrap; line-height: 1.5;
         }
         .item-row.self-doable { border-left: 3px solid #6b8e5c; background: #eef5ea; }
+        /* ?self=1 的篩選提示 */
+        .self-only-bar {
+            margin: 0 0 0.7rem; padding: 0.45rem 0.7rem; border-radius: 6px;
+            background: #eef5ea; border: 1px solid #cfe0c6; font-size: 0.82rem; color: #4f6b43;
+        }
+        .self-only-bar a { color: var(--color-accent); text-decoration: underline; }
         .item-row.kind-urgent { border-left: 3px solid #a8412f; background: #fdf1ef; }
         .item-row.kind-outsource { border-left: 3px solid #3f5f7a; background: #f0f5fa; }
         .item-row.kind-self { border-left: 3px solid #6b8e5c; background: #f2f7ef; }
@@ -790,6 +796,9 @@
             </div>`;
         }
 
+        // ?self=1 → 只看「自己可執行」的工項（LINE 通知裡的連結會帶這個參數）
+        const SELF_ONLY = new URLSearchParams(location.search).get('self') === '1';
+
         function renderTree(logs) {
             const box = document.getElementById('progressList');
             if (!box) return;
@@ -797,6 +806,10 @@
             // 篩選：採購工項（title=採購）未打「公開給業主看」→ 不顯示（業主看不到）
             for (const g of groups) {
                 g.items = g.items.filter(it => !(it.title === '採購' && it.procurement_public !== true));
+            }
+            // ?self=1 → 只留「自己可執行」的卡
+            if (SELF_ONLY) {
+                for (const g of groups) g.items = g.items.filter(it => it.self_doable);
             }
             // 待辦掛在工項上（buildTree 不管待辦，這裡接上去）
             for (const g of groups) {
@@ -820,6 +833,10 @@
                         ? g.items.map(itemRow).join('')
                         : '<div class="grp-empty">—</div>'}</div>
                 </div>`).join('')}</div>`;
+            if (SELF_ONLY) {
+                box.insertAdjacentHTML('afterbegin',
+                    '<div class="self-only-bar">只看「自己可執行」的工項 · <a href="./">顯示全部</a></div>');
+            }
         }
 
         function toggleGroup(el) {
