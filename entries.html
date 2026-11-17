@@ -103,7 +103,7 @@
         .sub-label { font-size: 12px; color: var(--color-accent); margin-top: 12px; }
         .ver { font-size: 11px; color: var(--color-muted); margin-left: auto; }
 
-        /* 紀錄分類（kk 2026-10-12）：外包 / 可自行處理 / 急件 */
+        /* 紀錄分類（kk 2026-10-12）：外包 / 可自行執行 / 急件 */
         .kind-tag {
             font-size: 10.5px; padding: 1px 6px; border-radius: 3px;
             border: 1px solid currentColor; white-space: nowrap; line-height: 1.5;
@@ -118,7 +118,7 @@
         .rec.kind-outsource { border-left: 3px solid #3f5f7a; background: #f0f5fa; }
         .rec.kind-self { border-left: 3px solid #6b8e5c; background: #f2f7ef; }
 
-        /* 「自己可執行」（借 items.contractor = 'self'）→ 卡片變綠色，一眼看出可以自己做
+        /* 「可自行執行」（借 items.contractor = 'self'）→ 卡片變綠色，一眼看出可以自己做
            ⚠️ 這條要放在 .item-row.need-attention 之前 —— 兩個都勾時，「需業主注意」優先顯示黃色 */
         .item-row.self-doable {
             border-left: 3px solid #6b8e5c; padding-left: 0.5rem; background: #eef5ea;
@@ -301,7 +301,7 @@
         /* 需注意 → 卡片變色凸顯 */
         .item-row.need-attention { background: #f6e6c4; border-left: 3px solid #d9a441; padding-left: 0.5rem; }
 
-        /* 同時勾「需業主注意」＋「自己可執行」→ 黃底（警示優先）＋ 綠左條（仍看得出可以自己做）
+        /* 同時勾「需業主注意」＋「可自行執行」→ 黃底（警示優先）＋ 綠左條（仍看得出可以自己做）
            ⚠️ 一定要放在 .item-row.need-attention 後面才蓋得掉左條顏色 */
         .item-row.need-attention.self-doable { background: #f6e6c4; border-left: 3px solid #6b8e5c; }
         .flag-warn { font-size: 0.72rem; color: #a06a00; font-weight: 600; white-space: nowrap; }
@@ -454,7 +454,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
-        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/17a</span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/17b</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -531,11 +531,11 @@
                     <option value="">未分類</option>
                     <option value="urgent">🔴 急件</option>
                     <option value="outsource">🔵 外包</option>
-                    <option value="self">🟢 可自行處理</option>
+                    <option value="self">🟢 可自行執行</option>
                 </select>
                 <div class="hint">
                     看板會依這個分類<strong>變顏色</strong>，同一欄裡<strong>急件排最上面</strong>，
-                    再來是外包、可自行處理，最後才是未分類。
+                    再來是外包、可自行執行，最後才是未分類。
                 </div>
             </div>
 
@@ -1445,7 +1445,7 @@
             return HAS_FINISH_AT;
         }
 
-        // 紀錄分類（外包／可自行處理／急件）—— 新欄位 project_logs.task_kind
+        // 紀錄分類（外包／可自行執行／急件）—— 新欄位 project_logs.task_kind
         // 沒跑 SQL 前 HAS_TASK_KIND = false → 下拉不出現、也不會送這個欄位（不會壞）
         let HAS_TASK_KIND = false;
 
@@ -1464,7 +1464,7 @@
             return HAS_LINE_OUTBOX;
         }
 
-        // 新增紀錄後：這張卡如果是「自己可執行」→ 問要不要發到 LINE「郭家族群」
+        // 新增紀錄後：這張卡如果是「可自行執行」→ 問要不要發到 LINE「郭家族群」
         // kind: 'new'（新紀錄）／'done'（標記完成）
         async function offerLinePush(logId, itemId, kind) {
             const box = $('lineOffer');
@@ -1478,13 +1478,13 @@
                     .select('contractor').eq('id', itemId).maybeSingle();
                 contractor = data ? data.contractor : null;
             } catch (e) { contractor = null; }
-            if (contractor !== 'self') return;      // 不是「自己可執行」→ 不打擾
+            if (contractor !== 'self') return;      // 不是「可自行執行」→ 不打擾
 
             const isDone = kind === 'done';
             box.innerHTML = `
                 <div class="lo-msg">📣 ${isDone
                     ? '這件已完成 —— 要發到 LINE「郭家族群」嗎？'
-                    : '這筆是「自己可執行」的工作 —— 要發到 LINE「郭家族群」嗎？'}</div>
+                    : '這筆是「可自行執行」的工作 —— 要發到 LINE「郭家族群」嗎？'}</div>
                 <div class="lo-btns">
                     <button type="button" class="primary small" id="lineSendBtn">發送到 LINE</button>
                     <button type="button" class="ghost small" id="lineSkipBtn">不用</button>
@@ -1559,7 +1559,7 @@
         }
 
         function kindOptions(cur) {
-            return [['', '未分類'], ['urgent', '🔴 急件'], ['outsource', '🔵 外包'], ['self', '🟢 可自行處理']]
+            return [['', '未分類'], ['urgent', '🔴 急件'], ['outsource', '🔵 外包'], ['self', '🟢 可自行執行']]
                 .map(([v, t]) => `<option value="${v}"${v === (cur || '') ? ' selected' : ''}>${t}</option>`)
                 .join('');
         }
@@ -1750,7 +1750,7 @@
             // 留空時「不要送這個欄位」，讓資料庫套用預設值。送 null 會違反 NOT NULL。
             const logTime = $('log_time').value;
             if (logTime) payload.log_time = logTime;
-            // 分類（外包／可自行處理／急件）——沒跑 SQL 前不送
+            // 分類（外包／可自行執行／急件）——沒跑 SQL 前不送
             if (HAS_TASK_KIND) payload.task_kind = ($('task_kind') && $('task_kind').value) || null;
             // 紀錄人：自動帶入登入者的名字（每人一個帳號）
             if (HAS_RECORDER) payload.recorder_name = MY_NAME || null;
@@ -1792,6 +1792,14 @@
                             '  2) 你是這個專案的 owner / editor 成員';
                 }
                 return say('formMsg', '寫入失敗：' + error.message + extra);
+            }
+
+            // 分類選「可自行執行」＝ 這張卡也可以自己執行 → 順手把卡片勾起來
+            // （kk：這兩個是同一件事，不要兩種標記各自為政）
+            if (itemId && payload.task_kind === 'self') {
+                try {
+                    await supabase.from('items').update({ contractor: 'self' }).eq('id', itemId).select('id');
+                } catch (e) { /* 失敗不影響紀錄已存 */ }
             }
 
             if (photos.length) {
@@ -1883,7 +1891,7 @@
             setFormOpen(false);   // 收起來，回到看板（成功訊息留在標題上方）
             await loadEntries();
             await loadStructureOptions($('project_id').value);   // 更新工項清單與進度卡狀態
-            // 這筆的卡如果是「自己可執行」→ 問要不要發到 LINE「郭家族群」
+            // 這筆的卡如果是「可自行執行」→ 問要不要發到 LINE「郭家族群」
             await offerLinePush(log.id, itemId, markComplete ? 'done' : 'new');
         }
 
@@ -2130,9 +2138,9 @@
                 completed_by: e.items ? e.items.completed_by : null,
                 // 預估完成時間（items.end_date）
                 finish_at: e.items ? (e.items.end_date || null) : null,
-                // 分類（外包／可自行處理／急件）
+                // 分類（外包／可自行執行／急件）
                 task_kind: e.task_kind || null,
-                // 自己可執行（items.contractor = 'self'）
+                // 可自行執行（items.contractor = 'self'）
                 self_doable: !!(e.items && e.items.contractor === 'self'),
             };
         }
@@ -2373,7 +2381,7 @@
                 <div class="item-head" data-item-head>
                     ${it.loc ? `<span class="it-loc">${esc(it.loc)}</span>` : ''}
                     <span class="it-title">${esc(it.title)}</span>
-                    ${it.self_doable ? '<span class="self-tag">自己可執行</span>' : ''}
+                    ${it.self_doable ? '<span class="self-tag">可自行執行</span>' : ''}
                     ${it.kind ? `<span class="kind-tag kind-${esc(it.kind)}">${esc(kindLabel(it.kind))}</span>` : ''}
                     ${flagAttention ? '<span class="flag-warn">⚠️ 需業主注意</span>' : ''}
                     ${it.status !== '_loose'
@@ -2795,7 +2803,7 @@
                         <input type="text" class="verify-name" data-completed-by="${esc(it.itemId)}" value="${esc(it.completed_by || '')}" placeholder="填名字"></label>` : ''}
                     ${HAS_CURRENCY ? `
                     <label class="sb-chk"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需業主注意</label>` : ''}
-                    <label class="sb-chk"><input type="checkbox" data-flag="self_doable" data-flag-item="${esc(it.itemId)}"${it.self_doable ? ' checked' : ''}>自己可執行</label>
+                    <label class="sb-chk"><input type="checkbox" data-flag="self_doable" data-flag-item="${esc(it.itemId)}"${it.self_doable ? ' checked' : ''}>可自行執行</label>
                     <span class="sb-hint">「開案 / 進行中 / 暫停」都是未完成；選「已完成」整張卡就結案。</span>
                     ${(st === 'completed' && !it.maintenance) ? maintCreateBlock(it) : ''}
                 </div>
@@ -2862,7 +2870,7 @@
         }
 
         async function toggleFlag(itemId, field, checked) {
-            // 「自己可執行」不是布林欄位：借用 items.contractor（text）存 'self' / null
+            // 「可自行執行」不是布林欄位：借用 items.contractor（text）存 'self' / null
             // → 不用新增欄位、不用跑 SQL（kk 2026-11-06 要求）
             const dbField = field === 'self_doable' ? 'contractor' : field;
             const dbValue = field === 'self_doable' ? (checked ? 'self' : null) : checked;
@@ -3212,7 +3220,7 @@
                     note.includes('⚠️') ? 'error' : 'ok');
                 await loadEntries();
                 await loadStructureOptions($('project_id').value);
-                // 標成「已完成」→ 如果是「自己可執行」的卡，問要不要發完成通知
+                // 標成「已完成」→ 如果是「可自行執行」的卡，問要不要發完成通知
                 if (val === 'completed') await offerLineInSheet(itemId);
             } catch (err) {
                 say('listMsg', '進度更新失敗：' + err.message, 'error');
@@ -3790,7 +3798,7 @@
                 // 進度快照＝送出當下那張進度卡的狀態（進度現在在浮層最上面改）
                 progress_status: itemId ? itemStatusNow : null
             };
-            // 分類（外包／可自行處理／急件）——沒跑 SQL 前不送
+            // 分類（外包／可自行執行／急件）——沒跑 SQL 前不送
             if (HAS_TASK_KIND) {
                 const kSel = $('ee-kind');
                 payload.task_kind = (kSel && kSel.value) || null;
@@ -3807,6 +3815,13 @@
                     extra = '\n\n→ 資料庫權限擋下：只有 admin 或該專案的 owner / editor 能修改紀錄。';
                 }
                 return say('listMsg', '儲存失敗：' + error.message + extra);
+            }
+
+            // 分類改成「可自行執行」→ 這張卡也一起勾起來（兩者是同一件事）
+            if (payload.task_kind === 'self' && itemId) {
+                try {
+                    await supabase.from('items').update({ contractor: 'self' }).eq('id', itemId).select('id');
+                } catch (e) { /* 不影響紀錄已存 */ }
             }
 
             // ② 追加新照片（先接在最後，下面再依拍攝日期重排）

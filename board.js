@@ -18,10 +18,10 @@ const GROUP_TITLE = { '': '開案（待辦）', in_progress: '進行中', paused
 const STATUS_LABEL = { '': '開案', completed: '已完成', in_progress: '進行中', paused: '暫停' };
 const STATUS_CLASS = { '': 'opened', completed: 'done', in_progress: 'doing', paused: 'paused' };
 
-// 紀錄分類（kk 2026-10-12）：外包 / 可自行處理 / 急件。沒勾＝未分類。
-// 顯示順序（權重）：急件 → 外包 → 可自行處理 → 未分類
+// 紀錄分類（kk 2026-10-12）：外包 / 可自行執行 / 急件。沒勾＝未分類。
+// 顯示順序（權重）：急件 → 外包 → 可自行執行 → 未分類
 const KIND_ORDER = ['urgent', 'outsource', 'self'];
-const KIND_LABEL = { urgent: '急件', outsource: '外包', self: '可自行處理' };
+const KIND_LABEL = { urgent: '急件', outsource: '外包', self: '可自行執行' };
 const KIND_COLOR = { urgent: '#a8412f', outsource: '#3f5f7a', self: '#6b8e5c' };
 
 function kindRank(k) { const i = KIND_ORDER.indexOf(k); return i < 0 ? 99 : i; }
@@ -145,7 +145,7 @@ function buildTree(logs) {
             finish_at: last.finish_at || null,
             // 這張卡的「分類」＝最新那筆紀錄的分類（紀錄掛分類，卡片跟著顯示）
             kind: last.task_kind || null,
-            // 自己可執行（借用 items.contractor = 'self'，進去時已正規化成 self_doable）
+            // 可自行執行（借用 items.contractor = 'self'，進去時已正規化成 self_doable）
             self_doable: !!(last.self_doable || last.contractor === 'self'),
         });
     }
@@ -154,9 +154,9 @@ function buildTree(logs) {
         // 長期維修工項一律沉到最下面
         g.items.sort((a, b) => {
             if (!!a.maintenance !== !!b.maintenance) return a.maintenance ? 1 : -1;
-            // 「自己可執行」的綠卡集中排最上面（kk 2026-11-06）
+            // 「可自行執行」的綠卡集中排最上面（kk 2026-11-06）
             if (!!a.self_doable !== !!b.self_doable) return a.self_doable ? -1 : 1;
-            // 分類優先：急件 → 外包 → 可自行處理 → 未分類（kk 2026-10-12）
+            // 分類優先：急件 → 外包 → 可自行執行 → 未分類（kk 2026-10-12）
             const ka = kindRank(a.kind), kb = kindRank(b.kind);
             if (ka !== kb) return ka - kb;
             return g.status === 'completed'
