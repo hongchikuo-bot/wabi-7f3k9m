@@ -282,6 +282,7 @@
         .line-offer .lo-msg { font-size: 0.85rem; line-height: 1.5; }
         .line-offer .lo-msg.ok { color: #4f6b43; font-weight: 600; }
         .line-offer .lo-btns { margin-top: 0.45rem; display: flex; gap: 0.4rem; }
+        .line-offer.in-sheet { margin: 0 0 0.7rem; position: sticky; top: 0; z-index: 6; }
         .cost-block .flag-pay { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid #eadfcb; }
         /* 費用：勾選才展開輸入表單 */
         .cost-toggle {
@@ -453,7 +454,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
-        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/14a</span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/14b</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -1464,7 +1465,8 @@
         }
 
         // 新增紀錄後：這張卡如果是「自己可執行」→ 問要不要發到 LINE「郭家族群」
-        async function offerLinePush(logId, itemId) {
+        // kind: 'new'（新紀錄）／'done'（標記完成）
+        async function offerLinePush(logId, itemId, kind) {
             const box = $('lineOffer');
             if (!box) return;
             box.classList.add('hidden');
@@ -1478,8 +1480,11 @@
             } catch (e) { contractor = null; }
             if (contractor !== 'self') return;      // 不是「自己可執行」→ 不打擾
 
+            const isDone = kind === 'done';
             box.innerHTML = `
-                <div class="lo-msg">📣 這筆是「自己可執行」的工作 —— 要發到 LINE「郭家族群」嗎？</div>
+                <div class="lo-msg">📣 ${isDone
+                    ? '這件已完成 —— 要發到 LINE「郭家族群」嗎？'
+                    : '這筆是「自己可執行」的工作 —— 要發到 LINE「郭家族群」嗎？'}</div>
                 <div class="lo-btns">
                     <button type="button" class="primary small" id="lineSendBtn">發送到 LINE</button>
                     <button type="button" class="ghost small" id="lineSkipBtn">不用</button>
@@ -1490,7 +1495,7 @@
                 btn.disabled = true;
                 btn.textContent = '排入中…';
                 const { error } = await supabase.from('line_outbox')
-                    .insert([{ log_id: logId, item_id: itemId }]);
+                    .insert([{ log_id: logId, item_id: itemId, kind: isDone ? 'done' : 'new' }]);
                 if (error) {
                     const dup = error.code === '23505';
                     box.innerHTML = `<div class="lo-msg">${dup
@@ -1501,6 +1506,47 @@
                 box.innerHTML = '<div class="lo-msg ok">✅ 已排入發送，大約 1 分鐘內會出現在「郭家族群」。</div>';
             };
             $('lineSkipBtn').onclick = () => { box.classList.add('hidden'); box.innerHTML = ''; };
+        }
+
+        // 在浮層裡把卡片標成「已完成」後 → 問要不要發到 LINE（同一個群的完成通知）
+        async function offerLineInSheet(itemId) {
+            if (!HAS_LINE_OUTBOX || !itemId) return;
+            const host = document.getElementById('sheetBox');
+            if (!host) return;
+            let contractor = null, logId = null;
+            try {
+                const { data } = await supabase.from('items')
+                    .select('contractor').eq('id', itemId).maybeSingle();
+                contractor = data ? data.contractor : null;
+                const { data: lg } = await supabase.from('project_logs')
+                    .select('id').eq('item_id', itemId)
+                    .order('log_date', { ascending: false }).limit(1);
+                logId = (lg && lg[0]) ? lg[0].id : null;
+            } catch (e) { return; }
+            if (contractor !== 'self' || !logId) return;
+
+            const bar = document.createElement('div');
+            bar.className = 'line-offer in-sheet';
+            bar.innerHTML = `
+                <div class="lo-msg">📣 這件標成「已完成」了 —— 要發到 LINE「郭家族群」嗎？</div>
+                <div class="lo-btns">
+                    <button type="button" class="primary small">發送到 LINE</button>
+                    <button type="button" class="ghost small">不用</button>
+                </div>`;
+            host.insertBefore(bar, host.firstChild);
+            const [send, skip] = bar.querySelectorAll('button');
+            send.onclick = async () => {
+                send.disabled = true;
+                send.textContent = '排入中…';
+                const { error } = await supabase.from('line_outbox')
+                    .insert([{ log_id: logId, item_id: itemId, kind: 'done' }]);
+                bar.innerHTML = error
+                    ? `<div class="lo-msg">${error.code === '23505'
+                        ? '✅ 這件已經發過了（不會重複發）'
+                        : '❌ 排入發送失敗：' + esc(error.message)}</div>`
+                    : '<div class="lo-msg ok">✅ 已排入發送，1 分鐘內會出現在「郭家族群」。</div>';
+            };
+            skip.onclick = () => bar.remove();
         }
 
         function kindOptions(cur) {
@@ -1829,7 +1875,7 @@
             await loadEntries();
             await loadStructureOptions($('project_id').value);   // 更新工項清單與進度卡狀態
             // 這筆的卡如果是「自己可執行」→ 問要不要發到 LINE「郭家族群」
-            await offerLinePush(log.id, itemId);
+            await offerLinePush(log.id, itemId, markComplete ? 'done' : 'new');
         }
 
         function clearForm() {
@@ -3157,6 +3203,8 @@
                     note.includes('⚠️') ? 'error' : 'ok');
                 await loadEntries();
                 await loadStructureOptions($('project_id').value);
+                // 標成「已完成」→ 如果是「自己可執行」的卡，問要不要發完成通知
+                if (val === 'completed') await offerLineInSheet(itemId);
             } catch (err) {
                 say('listMsg', '進度更新失敗：' + err.message, 'error');
                 await loadEntries();
