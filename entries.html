@@ -454,7 +454,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
-        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/17c</span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/17d</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -524,20 +524,7 @@
                 </div>
             </div>
 
-            <!-- ③ 分類（kk 2026-10-12）：掛在這一筆紀錄上，看板卡片會跟著變色並排序 -->
-            <div class="form-group">
-                <label>分類（選填）</label>
-                <select id="task_kind">
-                    <option value="">未分類</option>
-                    <option value="urgent">🔴 急件</option>
-                    <option value="outsource">🔵 外包</option>
-                    <option value="self">🟢 可自行執行</option>
-                </select>
-                <div class="hint">
-                    看板會依這個分類<strong>變顏色</strong>，同一欄裡<strong>急件排最上面</strong>，
-                    再來是外包、可自行執行，最後才是未分類。
-                </div>
-            </div>
+            <!-- ③ 分類已移到「卡片」上（浮層最上面）→ 新增紀錄時不用再選 -->
 
             <!-- 選了工項才出現：這個工項目前的狀況（純顯示） -->
             <div id="latestWrap" class="hidden">
@@ -1558,6 +1545,28 @@
             skip.onclick = () => bar.remove();
         }
 
+        // 卡片的「分類」＝ items.task_kind（一般／急件／外包／可自行執行）
+        // kk 2026-11-17：勾選與紀錄分類合併成這一個，不再分兩套
+        function itemKindOptions(cur) {
+            return [['', '一般'], ['urgent', '🔴 急件'], ['outsource', '🔵 外包'], ['self', '🟢 可自行執行']]
+                .map(([v, t]) => `<option value="${v}"${v === (cur || '') ? ' selected' : ''}>${t}</option>`)
+                .join('');
+        }
+
+        async function setItemKind(itemId, value) {
+            const v = value || null;
+            try {
+                const { error } = await supabase.from('items')
+                    .update({ task_kind: v }).eq('id', itemId).select('id');
+                if (error) throw error;
+                say('listMsg', `分類已改為「${v === 'self' ? '可自行執行' : v === 'urgent' ? '急件' : v === 'outsource' ? '外包' : '一般'}」`, 'ok');
+                await loadEntries();
+                await loadStructureOptions($('project_id').value);
+            } catch (err) {
+                say('listMsg', '分類更新失敗：' + err.message, 'error');
+            }
+        }
+
         function kindOptions(cur) {
             return [['', '未分類'], ['urgent', '🔴 急件'], ['outsource', '🔵 外包'], ['self', '🟢 可自行執行']]
                 .map(([v, t]) => `<option value="${v}"${v === (cur || '') ? ' selected' : ''}>${t}</option>`)
@@ -1751,7 +1760,6 @@
             const logTime = $('log_time').value;
             if (logTime) payload.log_time = logTime;
             // 分類（外包／可自行執行／急件）——沒跑 SQL 前不送
-            if (HAS_TASK_KIND) payload.task_kind = ($('task_kind') && $('task_kind').value) || null;
             // 紀錄人：自動帶入登入者的名字（每人一個帳號）
             if (HAS_RECORDER) payload.recorder_name = MY_NAME || null;
 
@@ -1792,14 +1800,6 @@
                             '  2) 你是這個專案的 owner / editor 成員';
                 }
                 return say('formMsg', '寫入失敗：' + error.message + extra);
-            }
-
-            // 分類選「可自行執行」＝ 這張卡也可以自己執行 → 順手把卡片勾起來
-            // （kk：這兩個是同一件事，不要兩種標記各自為政）
-            if (itemId && payload.task_kind === 'self') {
-                try {
-                    await supabase.from('items').update({ contractor: 'self' }).eq('id', itemId).select('id');
-                } catch (e) { /* 失敗不影響紀錄已存 */ }
             }
 
             if (photos.length) {
@@ -1903,8 +1903,6 @@
             ['log_time', 'work_type'].forEach(id => {
                 if ($(id)) $(id).value = '';
             });
-            // 分類也清掉（下一筆通常不同分類）
-            if ($('task_kind')) $('task_kind').value = '';
             if ($('workTypePick')) $('workTypePick').value = '';
             if ($('resolution')) $('resolution').value = '';     // 清掉「這次新增的待辦」緩衝
             if ($('newTodoText')) $('newTodoText').value = '';
@@ -1997,7 +1995,7 @@
                        + recCol
                        + (HAS_TASK_KIND ? ', task_kind' : '')
                        + ', log_photos(' + photoCols + '), '
-                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at, contractor'
+                       + 'items(title, work_type, status, created_at, estimated_cost, final_cost, paid_amount, payment_status, maintenance, next_maintenance_at, contractor, task_kind'
                        + (HAS_FINISH_AT ? ', end_date' : '')
                        + (HAS_QUOTES ? ', quotes' : '')
                        + (HAS_CURRENCY ? ', estimate_currency, final_currency, need_attention, payment_done, verified, verified_by' : '')
@@ -2138,10 +2136,10 @@
                 completed_by: e.items ? e.items.completed_by : null,
                 // 預估完成時間（items.end_date）
                 finish_at: e.items ? (e.items.end_date || null) : null,
-                // 分類（外包／可自行執行／急件）
-                task_kind: e.task_kind || null,
-                // 可自行執行（items.contractor = 'self'）
-                self_doable: !!(e.items && e.items.contractor === 'self'),
+                // 分類（掛在卡片：items.task_kind）
+                task_kind: (e.items && e.items.task_kind) || null,
+                // 可自行執行（＝卡片分類 self）
+                self_doable: !!(e.items && e.items.task_kind === 'self'),
             };
         }
 
@@ -2197,7 +2195,11 @@
             const photo = (e.log_photos && e.log_photos[0]) || {};
             // 最新那筆預設就攤開成可編輯（一進浮層就看得到欄位）；其他筆維持唯讀
             const isOpen = e.id === (openId || editingEntryId);
-            return `<div class="rec${e.task_kind ? ' kind-' + e.task_kind : ''}">
+            // 分類跟著卡片（items.task_kind）；舊資料也可能在紀錄上 → 兩邊都認
+            const recKind = e.task_kind
+                || (e.src && e.src.items && e.src.items.task_kind)
+                || (e.items && e.items.task_kind) || '';
+            return `<div class="rec${recKind ? ' kind-' + recKind : ''}">
                 <div class="rec-head">
                     <span class="rec-date">${esc(e.log_date)}${e.log_time ? ' ' + esc(String(e.log_time).slice(0, 5)) : ''}</span>
                     ${recName ? `<span class="rec-by">紀錄：${esc(recName)}</span>` : ''}
@@ -2803,7 +2805,8 @@
                         <input type="text" class="verify-name" data-completed-by="${esc(it.itemId)}" value="${esc(it.completed_by || '')}" placeholder="填名字"></label>` : ''}
                     ${HAS_CURRENCY ? `
                     <label class="sb-chk"><input type="checkbox" data-flag="need_attention" data-flag-item="${esc(it.itemId)}"${it.need_attention ? ' checked' : ''}>需業主注意</label>` : ''}
-                    <label class="sb-chk"><input type="checkbox" data-flag="self_doable" data-flag-item="${esc(it.itemId)}"${it.self_doable ? ' checked' : ''}>可自行執行</label>
+                    <label class="sb-chk sb-kind">分類
+                        <select data-sheet-kind="${esc(it.itemId)}">${itemKindOptions(it.kind)}</select></label>
                     <span class="sb-hint">「開案 / 進行中 / 暫停」都是未完成；選「已完成」整張卡就結案。</span>
                     ${(st === 'completed' && !it.maintenance) ? maintCreateBlock(it) : ''}
                 </div>
@@ -3363,6 +3366,10 @@
             box.querySelectorAll('[data-sheet-status]').forEach(sel => {
                 sel.onchange = () => setSheetStatus(sel.getAttribute('data-sheet-status'), sel.value);
             });
+            // 卡片分類（一般／急件／外包／可自行執行）→ 直接寫進度卡
+            box.querySelectorAll('[data-sheet-kind]').forEach(sel => {
+                sel.onchange = () => setItemKind(sel.getAttribute('data-sheet-kind'), sel.value);
+            });
             // 浮層最上面的「預估完成時間」→ 直接寫進度卡
             box.querySelectorAll('[data-sheet-finish]').forEach(inp => {
                 inp.onchange = () => setSheetFinish(inp.getAttribute('data-sheet-finish'), inp.value);
@@ -3532,8 +3539,7 @@
                         ${wtList.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}</select>
                         <input type="text" id="ee-worktype" value="${esc(curWT)}"
                                placeholder="例：主牆塗漿（留空＝不歸屬任何工項）"></div>
-                    ${HAS_TASK_KIND ? `<div><label>分類</label>
-                        <select id="ee-kind">${kindOptions(e.task_kind)}</select></div>` : ''}
+                    ${'' /* 分類已移到卡片（浮層最上面），紀錄不再選 */}
                     <div class="full"><label>主描述</label>
                         <textarea id="ee-desc" rows="2">${esc(e.main_description || '')}</textarea></div>
                     <div class="full"><label>發現問題</label>
@@ -3798,11 +3804,7 @@
                 // 進度快照＝送出當下那張進度卡的狀態（進度現在在浮層最上面改）
                 progress_status: itemId ? itemStatusNow : null
             };
-            // 分類（外包／可自行執行／急件）——沒跑 SQL 前不送
-            if (HAS_TASK_KIND) {
-                const kSel = $('ee-kind');
-                payload.task_kind = (kSel && kSel.value) || null;
-            }
+            // 分類已改成掛在「卡片」上（items.task_kind）→ 紀錄不再送 task_kind
             // log_time 是 NOT NULL：留空時「不要送這個欄位」，保留原本的值
             const t = $('ee-time').value;
             if (t) payload.log_time = t;
@@ -3815,13 +3817,6 @@
                     extra = '\n\n→ 資料庫權限擋下：只有 admin 或該專案的 owner / editor 能修改紀錄。';
                 }
                 return say('listMsg', '儲存失敗：' + error.message + extra);
-            }
-
-            // 分類改成「可自行執行」→ 這張卡也一起勾起來（兩者是同一件事）
-            if (payload.task_kind === 'self' && itemId) {
-                try {
-                    await supabase.from('items').update({ contractor: 'self' }).eq('id', itemId).select('id');
-                } catch (e) { /* 不影響紀錄已存 */ }
             }
 
             // ② 追加新照片（先接在最後，下面再依拍攝日期重排）

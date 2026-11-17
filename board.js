@@ -145,8 +145,8 @@ function buildTree(logs) {
             finish_at: last.finish_at || null,
             // 這張卡的「分類」＝最新那筆紀錄的分類（紀錄掛分類，卡片跟著顯示）
             kind: last.task_kind || null,
-            // 可自行執行（借用 items.contractor = 'self'，進去時已正規化成 self_doable）
-            self_doable: !!(last.self_doable || last.contractor === 'self'),
+            // 可自行執行（＝卡片分類 items.task_kind === 'self'）
+            self_doable: !!(last.self_doable || last.task_kind === 'self'),
         });
     }
     for (const g of groups) {
@@ -154,8 +154,6 @@ function buildTree(logs) {
         // 長期維修工項一律沉到最下面
         g.items.sort((a, b) => {
             if (!!a.maintenance !== !!b.maintenance) return a.maintenance ? 1 : -1;
-            // 「可自行執行」的綠卡集中排最上面（kk 2026-11-06）
-            if (!!a.self_doable !== !!b.self_doable) return a.self_doable ? -1 : 1;
             // 分類優先：急件 → 外包 → 可自行執行 → 未分類（kk 2026-10-12）
             const ka = kindRank(a.kind), kb = kindRank(b.kind);
             if (ka !== kb) return ka - kb;
