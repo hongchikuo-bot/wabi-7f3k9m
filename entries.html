@@ -454,7 +454,7 @@
     <header>
         <h1>工程紀錄管理</h1>
         <span id="status"></span>
-        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/14b</span>
+        <span class="ver" title="頁面版本（用來確認手機有沒有更新到）">v11/14c</span>
         <button class="ghost hidden" id="logoutBtn">登出</button>
     </header>
 
@@ -1494,8 +1494,13 @@
                 const btn = $('lineSendBtn');
                 btn.disabled = true;
                 btn.textContent = '排入中…';
-                const { error } = await supabase.from('line_outbox')
+                let { error } = await supabase.from('line_outbox')
                     .insert([{ log_id: logId, item_id: itemId, kind: isDone ? 'done' : 'new' }]);
+                // 資料表還沒有 kind 欄位（SQL 沒跑）→ 退回舊格式，至少「新紀錄」通知不會斷
+                if (error && error.code === '42703') {
+                    ({ error } = await supabase.from('line_outbox')
+                        .insert([{ log_id: logId, item_id: itemId }]));
+                }
                 if (error) {
                     const dup = error.code === '23505';
                     box.innerHTML = `<div class="lo-msg">${dup
@@ -1540,6 +1545,10 @@
                 send.textContent = '排入中…';
                 const { error } = await supabase.from('line_outbox')
                     .insert([{ log_id: logId, item_id: itemId, kind: 'done' }]);
+                if (error && error.code === '42703') {
+                    bar.innerHTML = '<div class="lo-msg">⚠️ 完成通知還沒開通（需要先跑一小段 SQL）。跟我說一聲。</div>';
+                    return;
+                }
                 bar.innerHTML = error
                     ? `<div class="lo-msg">${error.code === '23505'
                         ? '✅ 這件已經發過了（不會重複發）'
